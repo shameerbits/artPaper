@@ -1,0 +1,6 @@
+ai_art_bot/.venv/
+ai_art_bot/**/__pycache__/
+ai_art_bot/data/generated/*.png
+ai_art_bot/data/upscaled/*.png
+ai_art_bot/data/images.db
+ai_art_bot/data/app.log
