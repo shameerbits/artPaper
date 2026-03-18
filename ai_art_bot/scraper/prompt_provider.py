@@ -16,7 +16,7 @@ PROMPT_ENHANCER_MODEL = os.getenv("PROMPT_ENHANCER_MODEL", "gpt-4.1-mini")
 PROMPT_LOG_MAX_CHARS = int(os.getenv("PROMPT_LOG_MAX_CHARS", "260"))
 ENABLE_PROMPT_ENHANCER = os.getenv("ENABLE_PROMPT_ENHANCER", "true").lower() in {"1", "true", "yes"}
 BLOCKED_TOKENS = ["nsfw", "nude", "nudity", "gore", "blood"]
-PRIORITY_BASE_MODELS = ["Flux.1 D", "SDXL Hyper""]
+PRIORITY_BASE_MODELS = ["Flux.1 D", "SDXL Hyper"]
 ALLOWED_BASE_MODEL_TOKENS = [
     "flux.1",
     "Flux.1 D,
