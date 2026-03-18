@@ -19,7 +19,7 @@ BLOCKED_TOKENS = ["nsfw", "nude", "nudity", "gore", "blood"]
 PRIORITY_BASE_MODELS = ["Flux.1 D", "SDXL Hyper"]
 ALLOWED_BASE_MODEL_TOKENS = [
     "flux.1",
-    "Flux.1 D,
+    "Flux.1 D",
     "SDXL Hyper",
     "SDXL 1.0",
     "sdxl",
