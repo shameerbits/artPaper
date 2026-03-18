@@ -14,6 +14,7 @@ CIVITAI_IMAGES_API = os.getenv("CIVITAI_IMAGES_API", "https://civitai.com/api/v1
 REQUEST_TIMEOUT_SECONDS = int(os.getenv("PROMPT_API_TIMEOUT_SECONDS", "15"))
 PROMPT_ENHANCER_MODEL = os.getenv("PROMPT_ENHANCER_MODEL", "gpt-4.1-mini")
 PROMPT_LOG_MAX_CHARS = int(os.getenv("PROMPT_LOG_MAX_CHARS", "260"))
+BLOCKED_TOKENS = ["nsfw", "nude", "nudity", "gore", "blood"]
 
 
 def _build_openai_client() -> OpenAI | None:
@@ -42,10 +43,37 @@ def _clean_prompt(text: str) -> str:
     return text.strip('"')
 
 
-def _is_valid_prompt(text: str) -> bool:
+def _is_prompt_length_valid(text: str) -> bool:
+    return 20 <= len(text) <= 700
+
+
+def _is_blocked_prompt(text: str) -> bool:
     lowered = text.lower()
-    blocked = ["nsfw", "nude", "nudity", "gore", "blood"]
-    return 20 <= len(text) <= 700 and not any(token in lowered for token in blocked)
+    return any(token in lowered for token in BLOCKED_TOKENS)
+
+
+def _is_valid_prompt(text: str) -> bool:
+    return _is_prompt_length_valid(text) and not _is_blocked_prompt(text)
+
+
+def _select_safe_prompt(prompts: list[str], source: str) -> str | None:
+    if not prompts:
+        return None
+
+    candidates = prompts[:]
+    random.shuffle(candidates)
+
+    for index, prompt in enumerate(candidates, start=1):
+        if not _is_prompt_length_valid(prompt):
+            logger.warning(f"Skipping {source} prompt #{index}: invalid length")
+            continue
+        if _is_blocked_prompt(prompt):
+            logger.warning(f"Skipping {source} prompt #{index}: blocked token detected")
+            continue
+        logger.info(f"Selected safe prompt candidate #{index} from {source}")
+        return prompt
+
+    return None
 
 
 def _fallback_prompts() -> list[str]:
@@ -83,7 +111,7 @@ def _prompts_from_civitai() -> list[str]:
         meta = item.get("meta") or {}
         for field in ("prompt", "Prompt"):
             candidate = _clean_prompt(str(meta.get(field, "")))
-            if _is_valid_prompt(candidate):
+            if _is_prompt_length_valid(candidate):
                 prompts.add(candidate)
     logger.info(f"Collected {len(prompts)} prompts from CivitAI")
     return sorted(prompts)
@@ -193,27 +221,36 @@ def get_random_prompt() -> str:
 
     remote_prompts = _dedupe(civitai_prompts)
     if remote_prompts:
-        selected = random.choice(remote_prompts)
-        source = "civitai"
-        logger.info(f"Selected prompt source: {source}")
-        logger.info(f"Selected base prompt preview: {_preview(selected)}")
-        return _enhance_prompt(selected)
+        selected = _select_safe_prompt(remote_prompts, source="civitai")
+        if selected is None:
+            logger.warning("All CivitAI prompts were blocked or invalid; trying next source")
+        else:
+            source = "civitai"
+            logger.info(f"Selected prompt source: {source}")
+            logger.info(f"Selected base prompt preview: {_preview(selected)}")
+            return _enhance_prompt(selected)
 
     if generated_prompts:
-        selected = random.choice(generated_prompts)
-        source = "local_generator"
-        logger.info(f"Selected prompt source: {source}")
-        logger.info(f"Selected base prompt preview: {_preview(selected)}")
-        return _enhance_prompt(selected)
+        selected = _select_safe_prompt(generated_prompts, source="local_generator")
+        if selected is None:
+            logger.warning("All generated prompts were blocked or invalid; trying fallback source")
+        else:
+            source = "local_generator"
+            logger.info(f"Selected prompt source: {source}")
+            logger.info(f"Selected base prompt preview: {_preview(selected)}")
+            return _enhance_prompt(selected)
 
     fallback = _fallback_prompts()
     if fallback:
         logger.warning("Prompt APIs unavailable; using prompts.txt fallback")
-        selected = random.choice(fallback)
-        source = "prompts_txt"
-        logger.info(f"Selected prompt source: {source}")
-        logger.info(f"Selected base prompt preview: {_preview(selected)}")
-        return _enhance_prompt(selected)
+        selected = _select_safe_prompt(fallback, source="prompts_txt")
+        if selected is None:
+            logger.warning("All prompts.txt prompts were blocked or invalid")
+        else:
+            source = "prompts_txt"
+            logger.info(f"Selected prompt source: {source}")
+            logger.info(f"Selected base prompt preview: {_preview(selected)}")
+            return _enhance_prompt(selected)
 
     raise RuntimeError("No prompts available from APIs, generator, or prompts.txt")
 
