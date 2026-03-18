@@ -14,7 +14,20 @@ CIVITAI_IMAGES_API = os.getenv("CIVITAI_IMAGES_API", "https://civitai.com/api/v1
 REQUEST_TIMEOUT_SECONDS = int(os.getenv("PROMPT_API_TIMEOUT_SECONDS", "15"))
 PROMPT_ENHANCER_MODEL = os.getenv("PROMPT_ENHANCER_MODEL", "gpt-4.1-mini")
 PROMPT_LOG_MAX_CHARS = int(os.getenv("PROMPT_LOG_MAX_CHARS", "260"))
+ENABLE_PROMPT_ENHANCER = os.getenv("ENABLE_PROMPT_ENHANCER", "true").lower() in {"1", "true", "yes"}
 BLOCKED_TOKENS = ["nsfw", "nude", "nudity", "gore", "blood"]
+ALLOWED_BASE_MODEL_TOKENS = ["sdxl", "flux.1 d", "flux.1 s"]
+DISALLOWED_BASE_MODEL_TOKENS = ["sd 1.5", "anime", "pony"]
+NOISE_KEYWORDS = {
+    "masterpiece",
+    "best quality",
+    "high quality",
+    "highres",
+    "absurdres",
+    "ultra detailed",
+    "8k",
+    "sharp focus",
+}
 
 
 def _build_openai_client() -> OpenAI | None:
@@ -43,8 +56,79 @@ def _clean_prompt(text: str) -> str:
     return text.strip('"')
 
 
+def clean_prompt(prompt: str) -> str:
+    cleaned = _clean_prompt(prompt)
+
+    # Remove weighted tokens like (word:1.2)
+    cleaned = re.sub(r"\(([^()]+):\s*[-+]?\d+(?:\.\d+)?\)", r"\1", cleaned)
+    # Remove remaining extra parentheses but keep content
+    cleaned = cleaned.replace("((", "(").replace("))", ")")
+    cleaned = cleaned.replace("(", "").replace(")", "")
+    # Remove score_* patterns
+    cleaned = re.sub(r"\bscore[_\-]?\d+([_\-]?up)?\b", "", cleaned, flags=re.IGNORECASE)
+
+    parts = [part.strip() for part in cleaned.split(",") if part.strip()]
+    filtered_parts: list[str] = []
+    for part in parts:
+        lowered = part.lower()
+        if any(keyword in lowered for keyword in NOISE_KEYWORDS):
+            continue
+        if lowered.startswith("lora:") or "<lora:" in lowered:
+            continue
+        if re.fullmatch(r"[A-Z]{4,}", part):
+            continue
+        if re.fullmatch(r"[A-Za-z0-9_-]{4,}", part):
+            has_vowel = any(ch in "aeiouAEIOU" for ch in part)
+            has_digit = any(ch.isdigit() for ch in part)
+            if not has_vowel or has_digit:
+                continue
+        filtered_parts.append(part)
+
+    cleaned = ", ".join(filtered_parts)
+    cleaned = re.sub(r",\s*,+", ", ", cleaned)
+    cleaned = re.sub(r"\s+", " ", cleaned)
+    return cleaned.strip(" ,")
+
+
+def convert_to_natural_prompt(prompt: str) -> str:
+    cleaned = clean_prompt(prompt)
+    if not cleaned:
+        return ""
+
+    tags = [tag.strip() for tag in cleaned.split(",") if tag.strip()]
+    if not tags:
+        return ""
+
+    first = tags[0]
+    person_map = {
+        "1girl": "a woman",
+        "1 girl": "a woman",
+        "girl": "a woman",
+        "1boy": "a man",
+        "1 boy": "a man",
+        "boy": "a man",
+        "woman": "a woman",
+        "man": "a man",
+    }
+    subject = person_map.get(first.lower(), first)
+
+    detail_tags = tags[1:] if len(tags) > 1 else []
+    if subject.lower().startswith(("a ", "an ", "the ")):
+        lead = f"A cinematic, ultra detailed depiction of {subject}"
+    else:
+        lead = f"A cinematic, ultra detailed scene featuring {subject}"
+
+    if not detail_tags:
+        return f"{lead}."
+    if len(detail_tags) == 1:
+        return f"{lead} with {detail_tags[0]}."
+    if len(detail_tags) == 2:
+        return f"{lead} with {detail_tags[0]} and {detail_tags[1]}."
+    return f"{lead} with {', '.join(detail_tags[:-1])}, and {detail_tags[-1]}."
+
+
 def _is_prompt_length_valid(text: str) -> bool:
-    return 20 <= len(text) <= 700
+    return 20 <= len(text) <= 900
 
 
 def _is_blocked_prompt(text: str) -> bool:
@@ -54,6 +138,15 @@ def _is_blocked_prompt(text: str) -> bool:
 
 def _is_valid_prompt(text: str) -> bool:
     return _is_prompt_length_valid(text) and not _is_blocked_prompt(text)
+
+
+def _is_allowed_base_model(base_model: str) -> bool:
+    normalized = (base_model or "").strip().lower()
+    if not normalized:
+        return False
+    if any(token in normalized for token in DISALLOWED_BASE_MODEL_TOKENS):
+        return False
+    return any(token in normalized for token in ALLOWED_BASE_MODEL_TOKENS)
 
 
 def _select_safe_prompt(prompts: list[str], source: str) -> str | None:
@@ -80,7 +173,7 @@ def _fallback_prompts() -> list[str]:
     file_path = Path(PROMPTS_FILE)
     if not file_path.exists():
         return []
-    prompts = [_clean_prompt(line) for line in file_path.read_text().splitlines() if line.strip()]
+    prompts = [convert_to_natural_prompt(line) for line in file_path.read_text().splitlines() if line.strip()]
     return [prompt for prompt in prompts if _is_valid_prompt(prompt)]
 
 
@@ -107,17 +200,49 @@ def _prompts_from_civitai() -> list[str]:
         return []
 
     prompts: set[str] = set()
+    rejected_missing_or_invalid_base_model = 0
+    rejected_missing_prompt = 0
+    accepted = 0
+
     for item in payload.get("items", []):
         meta = item.get("meta") or {}
-        for field in ("prompt", "Prompt"):
-            candidate = _clean_prompt(str(meta.get(field, "")))
-            if _is_prompt_length_valid(candidate):
-                prompts.add(candidate)
-    logger.info(f"Collected {len(prompts)} prompts from CivitAI")
+        base_model = str(
+            item.get("baseModel")
+            or (item.get("model") or {}).get("baseModel")
+            or (item.get("modelVersion") or {}).get("baseModel")
+            or meta.get("baseModel")
+            or meta.get("Base Model")
+            or ""
+        )
+        if not _is_allowed_base_model(base_model):
+            rejected_missing_or_invalid_base_model += 1
+            continue
+
+        raw_prompt = str(meta.get("prompt") or meta.get("Prompt") or "")
+        _negative_prompt = str(meta.get("negativePrompt") or meta.get("Negative prompt") or "")
+        if not raw_prompt.strip():
+            rejected_missing_prompt += 1
+            continue
+
+        candidate = convert_to_natural_prompt(raw_prompt)
+        if _is_valid_prompt(candidate):
+            prompts.add(candidate)
+            accepted += 1
+
+    logger.info(
+        "CivitAI prompt filtering stats: "
+        f"accepted={accepted}, "
+        f"rejected_base_model={rejected_missing_or_invalid_base_model}, "
+        f"rejected_missing_prompt={rejected_missing_prompt}, "
+        f"final_unique={len(prompts)}"
+    )
     return sorted(prompts)
 
 
 def _enhance_prompt(prompt: str) -> str:
+    if not ENABLE_PROMPT_ENHANCER:
+        return prompt
+
     if OPENAI_CLIENT is None:
         logger.warning("OPENAI_API_KEY not set; skipping GPT prompt enhancement")
         return prompt
@@ -126,12 +251,13 @@ def _enhance_prompt(prompt: str) -> str:
         response = OPENAI_CLIENT.responses.create(
             model=PROMPT_ENHANCER_MODEL,
             input=(
-                "Enhance this image prompt with rich details, lighting, and composition. "
-                "Return only one final prompt line, no markdown or explanations:\n"
+                "Rewrite this image prompt into a highly detailed, cinematic, natural language prompt suitable for AI image generation. "
+                "Avoid weighted tokens, tags, model syntax, or comma-only keyword dumps. "
+                "Return exactly one concise sentence, no markdown or explanations:\n"
                 f"{prompt}"
             ),
         )
-        enhanced = _clean_prompt(response.output_text.strip())
+        enhanced = convert_to_natural_prompt(response.output_text.strip())
         if _is_valid_prompt(enhanced):
             logger.info(f"Prompt enhanced with {PROMPT_ENHANCER_MODEL}")
             logger.info(f"Enhanced prompt preview: {_preview(enhanced)}")
@@ -195,7 +321,7 @@ def _generate_prompts(count: int = 30) -> list[str]:
                 "ultra detailed, 8k, sharp focus",
             ]
         )
-        cleaned = _clean_prompt(prompt)
+        cleaned = convert_to_natural_prompt(prompt)
         if _is_valid_prompt(cleaned):
             generated.add(cleaned)
 
@@ -228,7 +354,9 @@ def get_random_prompt() -> str:
             source = "civitai"
             logger.info(f"Selected prompt source: {source}")
             logger.info(f"Selected base prompt preview: {_preview(selected)}")
-            return _enhance_prompt(selected)
+            final_prompt = _enhance_prompt(selected)
+            logger.info(f"Final selected prompt: {_preview(final_prompt)}")
+            return final_prompt
 
     if generated_prompts:
         selected = _select_safe_prompt(generated_prompts, source="local_generator")
@@ -238,7 +366,9 @@ def get_random_prompt() -> str:
             source = "local_generator"
             logger.info(f"Selected prompt source: {source}")
             logger.info(f"Selected base prompt preview: {_preview(selected)}")
-            return _enhance_prompt(selected)
+            final_prompt = _enhance_prompt(selected)
+            logger.info(f"Final selected prompt: {_preview(final_prompt)}")
+            return final_prompt
 
     fallback = _fallback_prompts()
     if fallback:
@@ -250,7 +380,9 @@ def get_random_prompt() -> str:
             source = "prompts_txt"
             logger.info(f"Selected prompt source: {source}")
             logger.info(f"Selected base prompt preview: {_preview(selected)}")
-            return _enhance_prompt(selected)
+            final_prompt = _enhance_prompt(selected)
+            logger.info(f"Final selected prompt: {_preview(final_prompt)}")
+            return final_prompt
 
     raise RuntimeError("No prompts available from APIs, generator, or prompts.txt")
 
