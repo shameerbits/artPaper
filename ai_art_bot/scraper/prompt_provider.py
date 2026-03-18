@@ -277,9 +277,14 @@ def _enhance_prompt(prompt: str) -> str:
         response = OPENAI_CLIENT.responses.create(
             model=PROMPT_ENHANCER_MODEL,
             input=(
-                "Rewrite this image prompt into a highly detailed, cinematic, natural language prompt suitable for AI image generation. "
-                "Avoid weighted tokens, tags, model syntax, or comma-only keyword dumps. "
-                "Return exactly one concise sentence, no markdown or explanations:\n"
+                "Rewrite the following image prompt to be safe for AI image generation.\n\n"
+                "Remove any copyrighted references, brand names, or identifiable characters. "
+                "Avoid sensitive or unsafe content. Keep the concept creative and visually appealing.\n\n"
+                "Then enhance it into a highly detailed, cinematic, natural language prompt suitable for modern image generation models.\n\n"
+                "Avoid weighted syntax (e.g., (word:1.2)), tag-style keywords, or comma-separated fragments. "
+                "Write it as one clear, descriptive sentence.\n\n"
+                "Return exactly one concise sentence. Do not include explanations or formatting.\n\n"
+                "Prompt:\n"
                 f"{prompt}"
             ),
         )
