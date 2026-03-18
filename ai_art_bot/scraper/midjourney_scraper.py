@@ -13,6 +13,14 @@ from utils.logger import logger
 
 MIDJOURNEY_URL = "https://www.midjourney.com/explore?tab=top"
 MIDJOURNEY_BASE = "https://www.midjourney.com"
+SECURITY_HINTS = [
+    "security verification",
+    "verify you are human",
+    "captcha",
+    "challenge",
+    "just a moment",
+    "cloudflare",
+]
 PROMPT_PATTERNS = [
     r'"job_prompt"\s*:\s*"(.*?)"',
     r'"prompt"\s*:\s*"(.*?)"',
@@ -120,15 +128,48 @@ def _extract_prompt_from_job_page(page) -> str | None:
     return None
 
 
+def _is_security_challenge(page) -> bool:
+    url = page.url.lower()
+    if any(token in url for token in ["security", "verify", "challenge", "captcha"]):
+        return True
+    try:
+        body = page.inner_text("body").lower()
+    except Exception:
+        return False
+    return any(hint in body for hint in SECURITY_HINTS)
+
+
+def _wait_for_security_clear(page, timeout_ms: int = 120000) -> bool:
+    start = page.evaluate("Date.now()")
+    while True:
+        if not _is_security_challenge(page):
+            return True
+        now = page.evaluate("Date.now()")
+        if now - start > timeout_ms:
+            return False
+        page.wait_for_timeout(2000)
+
+
 def get_random_prompt() -> str:
     try:
         headless = os.getenv("MIDJOURNEY_HEADLESS", "true").lower() not in {"0", "false", "no"}
+        manual_verify = os.getenv("MIDJOURNEY_MANUAL_VERIFY", "true").lower() in {"1", "true", "yes"}
         logger.info(f"MidJourney scraper headless mode: {headless}")
         with sync_playwright() as playwright:
             browser = playwright.chromium.launch(headless=headless)
             page = browser.new_page(viewport={"width": 1440, "height": 1200})
             page.goto(MIDJOURNEY_URL, wait_until="domcontentloaded", timeout=90000)
             page.wait_for_timeout(5000)
+
+            if _is_security_challenge(page):
+                if (not headless) and manual_verify:
+                    logger.warning("Security verification detected. Complete the challenge in the browser; waiting up to 120 seconds")
+                    if not _wait_for_security_clear(page, timeout_ms=120000):
+                        raise RuntimeError("Security verification not cleared within timeout")
+                    logger.info("Security verification cleared")
+                else:
+                    raise RuntimeError("Security verification page detected; run headed mode and clear manually")
+
             _dismiss_onboarding_modal(page)
 
             job_urls = _collect_job_urls(page)
@@ -139,6 +180,15 @@ def get_random_prompt() -> str:
             logger.info(f"Selected MidJourney job URL: {selected_url}")
             page.goto(selected_url, wait_until="domcontentloaded", timeout=60000)
             page.wait_for_timeout(3000)
+
+            if _is_security_challenge(page):
+                if (not headless) and manual_verify:
+                    logger.warning("Security verification detected on job page. Complete it manually; waiting up to 120 seconds")
+                    if not _wait_for_security_clear(page, timeout_ms=120000):
+                        raise RuntimeError("Job page security verification not cleared within timeout")
+                    page.wait_for_timeout(1500)
+                else:
+                    raise RuntimeError("Security verification page detected on job URL")
 
             prompt = _extract_prompt_from_job_page(page)
             browser.close()
