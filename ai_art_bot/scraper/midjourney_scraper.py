@@ -1,5 +1,6 @@
 import random
 import re
+import os
 from pathlib import Path
 from urllib.parse import urljoin
 
@@ -56,6 +57,25 @@ def _extract_prompts_from_html(html: str) -> list[str]:
     return sorted(prompts)
 
 
+def _dismiss_onboarding_modal(page) -> None:
+    selectors = [
+        "button:has-text('Look around a bit')",
+        "button:has-text('Look around')",
+        "text=Look around a bit",
+        "text=Look around",
+    ]
+    for selector in selectors:
+        try:
+            button = page.locator(selector).first
+            if button.is_visible(timeout=2000):
+                button.click(timeout=3000)
+                page.wait_for_timeout(1200)
+                logger.info("Dismissed MidJourney onboarding modal")
+                return
+        except Exception:
+            continue
+
+
 def _collect_job_urls(page) -> list[str]:
     urls: set[str] = set()
     last_count = 0
@@ -102,11 +122,13 @@ def _extract_prompt_from_job_page(page) -> str | None:
 
 def get_random_prompt() -> str:
     try:
+        headless = os.getenv("MIDJOURNEY_HEADLESS", "true").lower() not in {"0", "false", "no"}
         with sync_playwright() as playwright:
-            browser = playwright.chromium.launch(headless=True)
+            browser = playwright.chromium.launch(headless=headless)
             page = browser.new_page(viewport={"width": 1440, "height": 1200})
             page.goto(MIDJOURNEY_URL, wait_until="domcontentloaded", timeout=90000)
             page.wait_for_timeout(5000)
+            _dismiss_onboarding_modal(page)
 
             job_urls = _collect_job_urls(page)
             if not job_urls:
