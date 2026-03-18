@@ -4,7 +4,7 @@ from typing import Any
 
 from database.db import init_db, mark_uploaded, save_image_record
 from generator.image_generator import generate_image
-from scraper.midjourney_scraper import get_random_prompt
+from scraper.prompt_provider import get_random_prompt
 from uploader.deviantart_upload import upload_image
 from upscaler.image_upscaler import upscale_image
 from utils.logger import logger

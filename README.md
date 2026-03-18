@@ -1,6 +1,6 @@
 # artPaper
 
-Simple local Python pipeline for scraping a MidJourney-style prompt, generating an image with OpenAI, upscaling it with Replicate, publishing it to DeviantArt, and recording metadata in SQLite.
+Simple local Python pipeline for selecting a Stable Diffusion-style prompt (from APIs/datasets plus a local generator), generating an image with OpenAI, upscaling it with Replicate, publishing it to DeviantArt, and recording metadata in SQLite.
 
 ## Project structure
 
@@ -9,7 +9,7 @@ ai_art_bot/
 	app.py
 	requirements.txt
 	scraper/
-		midjourney_scraper.py
+		prompt_provider.py
 	generator/
 		image_generator.py
 	upscaler/
@@ -33,16 +33,14 @@ ai_art_bot/
 
 1. Create and activate a Python 3.11+ virtual environment.
 2. Install dependencies.
-3. Install the Playwright browser.
-4. Export the required environment variables.
-5. Run the CLI.
+3. Export the required environment variables.
+4. Run the CLI.
 
 ```bash
 cd ai_art_bot
 python -m venv .venv
 source .venv/bin/activate
 pip install -r requirements.txt
-playwright install chromium
 ```
 
 ## Environment variables
@@ -56,13 +54,16 @@ export DEVIANTART_REFRESH_TOKEN="..."
 export DEVIANTART_ACCESS_TOKEN=""
 export DEVIANTART_USERNAME="me"
 export RUN_INTERVAL_MINUTES="60"
+export CIVITAI_IMAGES_API="https://civitai.com/api/v1/images"
+export LEXICA_SEARCH_API="https://lexica.art/api/v1/search"
+export PROMPT_API_TIMEOUT_SECONDS="15"
 ```
 
 Notes:
 
 - DeviantArt uploads usually require a user-approved OAuth refresh token. Client ID and secret alone are not enough to publish on behalf of an account.
 - `DEVIANTART_ACCESS_TOKEN` is optional if you already have a fresh token and want to skip the refresh call.
-- If MidJourney scraping fails, the app automatically falls back to `prompts.txt`.
+- Prompt collection uses CivitAI-style API data first, then Lexica-style prompt search, then a local prompt generator, then `prompts.txt` fallback.
 
 ## Commands
 

@@ -1,0 +1,197 @@
+import os
+import random
+import re
+from pathlib import Path
+
+import requests
+
+from utils.config import PROMPTS_FILE
+from utils.logger import logger
+
+
+CIVITAI_IMAGES_API = os.getenv("CIVITAI_IMAGES_API", "https://civitai.com/api/v1/images")
+LEXICA_SEARCH_API = os.getenv("LEXICA_SEARCH_API", "https://lexica.art/api/v1/search")
+REQUEST_TIMEOUT_SECONDS = int(os.getenv("PROMPT_API_TIMEOUT_SECONDS", "15"))
+
+
+def _clean_prompt(text: str) -> str:
+    if not text:
+        return ""
+    text = bytes(text, "utf-8").decode("unicode_escape")
+    text = re.sub(r"\s+", " ", text).strip()
+    text = text.removeprefix("/imagine prompt:").strip(" :")
+    return text.strip('"')
+
+
+def _is_valid_prompt(text: str) -> bool:
+    lowered = text.lower()
+    blocked = ["nsfw", "nude", "nudity", "gore", "blood"]
+    return 20 <= len(text) <= 700 and not any(token in lowered for token in blocked)
+
+
+def _fallback_prompts() -> list[str]:
+    file_path = Path(PROMPTS_FILE)
+    if not file_path.exists():
+        return []
+    prompts = [_clean_prompt(line) for line in file_path.read_text().splitlines() if line.strip()]
+    return [prompt for prompt in prompts if _is_valid_prompt(prompt)]
+
+
+def _fetch_json(url: str, params: dict | None = None) -> dict:
+    headers = {"User-Agent": "artPaper-bot/1.0"}
+    response = requests.get(
+        url,
+        params=params,
+        timeout=REQUEST_TIMEOUT_SECONDS,
+        headers=headers,
+    )
+    response.raise_for_status()
+    return response.json()
+
+
+def _prompts_from_civitai() -> list[str]:
+    try:
+        payload = _fetch_json(
+            CIVITAI_IMAGES_API,
+            params={"limit": 100, "sort": "Most Reactions", "period": "Week"},
+        )
+    except Exception as exc:
+        logger.warning(f"Failed to load prompts from CivitAI API: {exc}")
+        return []
+
+    prompts: set[str] = set()
+    for item in payload.get("items", []):
+        meta = item.get("meta") or {}
+        for field in ("prompt", "Prompt"):
+            candidate = _clean_prompt(str(meta.get(field, "")))
+            if _is_valid_prompt(candidate):
+                prompts.add(candidate)
+    logger.info(f"Collected {len(prompts)} prompts from CivitAI")
+    return sorted(prompts)
+
+
+def _prompts_from_lexica() -> list[str]:
+    queries = [
+        "cinematic portrait",
+        "digital art fantasy landscape",
+        "ultra detailed concept art",
+        "photoreal editorial lighting",
+        "surreal dreamscape",
+    ]
+    prompts: set[str] = set()
+
+    for query in queries:
+        try:
+            payload = _fetch_json(LEXICA_SEARCH_API, params={"q": query})
+        except Exception as exc:
+            logger.warning(f"Failed to load Lexica prompts for '{query}': {exc}")
+            continue
+
+        for image in payload.get("images", []):
+            candidate = _clean_prompt(str(image.get("prompt", "")))
+            if _is_valid_prompt(candidate):
+                prompts.add(candidate)
+
+    logger.info(f"Collected {len(prompts)} prompts from Lexica")
+    return sorted(prompts)
+
+
+def _generate_prompts(count: int = 30) -> list[str]:
+    subjects = [
+        "a floating island city",
+        "an astronaut botanist",
+        "a biomechanical fox",
+        "an ancient tree temple",
+        "a futuristic street market",
+        "a desert observatory",
+        "an underwater library",
+        "a volcanic crystal cave",
+    ]
+    styles = [
+        "cinematic concept art",
+        "high-detail matte painting",
+        "editorial fashion photography",
+        "retro-futurist illustration",
+        "surreal fine art",
+        "hyperreal digital painting",
+    ]
+    lighting = [
+        "golden hour volumetric light",
+        "dramatic rim lighting",
+        "soft diffused studio light",
+        "neon reflections and mist",
+        "moody moonlight",
+    ]
+    moods = [
+        "mysterious and serene",
+        "epic and majestic",
+        "dreamlike and atmospheric",
+        "bold and energetic",
+        "minimal and contemplative",
+    ]
+    camera = [
+        "35mm lens",
+        "85mm portrait lens",
+        "wide-angle composition",
+        "isometric composition",
+    ]
+
+    generated: set[str] = set()
+    while len(generated) < count:
+        prompt = ", ".join(
+            [
+                random.choice(subjects),
+                random.choice(styles),
+                random.choice(lighting),
+                random.choice(moods),
+                random.choice(camera),
+                "ultra detailed, 8k, sharp focus",
+            ]
+        )
+        cleaned = _clean_prompt(prompt)
+        if _is_valid_prompt(cleaned):
+            generated.add(cleaned)
+
+    logger.info(f"Generated {len(generated)} local prompts")
+    return sorted(generated)
+
+
+def _dedupe(prompts: list[str]) -> list[str]:
+    seen: set[str] = set()
+    deduped: list[str] = []
+    for prompt in prompts:
+        key = prompt.lower()
+        if key in seen:
+            continue
+        seen.add(key)
+        deduped.append(prompt)
+    return deduped
+
+
+def get_random_prompt() -> str:
+    civitai_prompts = _prompts_from_civitai()
+    lexica_prompts = _prompts_from_lexica()
+    generated_prompts = _generate_prompts(count=40)
+
+    remote_prompts = _dedupe(civitai_prompts + lexica_prompts)
+    if remote_prompts:
+        selected = random.choice(remote_prompts)
+        logger.info("Selected prompt from external Stable Diffusion prompt datasets/APIs")
+        return selected
+
+    if generated_prompts:
+        selected = random.choice(generated_prompts)
+        logger.info("Selected prompt from local prompt generator")
+        return selected
+
+    fallback = _fallback_prompts()
+    if fallback:
+        logger.warning("Prompt APIs unavailable; using prompts.txt fallback")
+        return random.choice(fallback)
+
+    raise RuntimeError("No prompts available from APIs, generator, or prompts.txt")
+
+
+if __name__ == "__main__":
+    selected_prompt = get_random_prompt()
+    print(f"PROMPT: {selected_prompt}")
