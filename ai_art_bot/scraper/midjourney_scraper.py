@@ -123,6 +123,7 @@ def _extract_prompt_from_job_page(page) -> str | None:
 def get_random_prompt() -> str:
     try:
         headless = os.getenv("MIDJOURNEY_HEADLESS", "true").lower() not in {"0", "false", "no"}
+        logger.info(f"MidJourney scraper headless mode: {headless}")
         with sync_playwright() as playwright:
             browser = playwright.chromium.launch(headless=headless)
             page = browser.new_page(viewport={"width": 1440, "height": 1200})
@@ -151,3 +152,8 @@ def get_random_prompt() -> str:
         if fallback:
             return random.choice(fallback)
         raise RuntimeError("No prompts available from MidJourney or prompts.txt") from exc
+
+
+if __name__ == "__main__":
+    selected_prompt = get_random_prompt()
+    print(f"PROMPT: {selected_prompt}")
