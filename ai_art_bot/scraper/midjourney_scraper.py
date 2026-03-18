@@ -150,29 +150,64 @@ def _wait_for_security_clear(page, timeout_ms: int = 120000) -> bool:
         page.wait_for_timeout(2000)
 
 
+def _manual_verification_prompt(page, location: str = "explore") -> bool:
+    logger.warning(f"MANUAL VERIFICATION REQUIRED at {location}")
+    logger.warning("Complete the security challenge in the Chromium browser window.")
+    logger.warning("Waiting up to 180 seconds. Page will continue automatically once cleared.")
+    
+    start = page.evaluate("Date.now()")
+    max_wait = 180000
+    
+    for attempt in range(1, 91):
+        now = page.evaluate("Date.now()")
+        elapsed = now - start
+        if elapsed > max_wait:
+            logger.error(f"Manual verification timeout after {elapsed}ms")
+            return False
+        
+        is_challenge = _is_security_challenge(page)
+        if not is_challenge:
+            logger.info(f"Verification cleared")
+            page.wait_for_timeout(1500)
+            return True
+        
+        if attempt % 10 == 0:
+            logger.info(f"Waiting for verification... ({int(elapsed/1000)}s elapsed)")
+        
+        page.wait_for_timeout(2000)
+    
+    return False
+
+
 def get_random_prompt() -> str:
     try:
         headless = os.getenv("MIDJOURNEY_HEADLESS", "true").lower() not in {"0", "false", "no"}
         manual_verify = os.getenv("MIDJOURNEY_MANUAL_VERIFY", "true").lower() in {"1", "true", "yes"}
-        logger.info(f"MidJourney scraper headless mode: {headless}")
+        logger.info(f"MidJourney scraper starting. headless={headless}, manual_verify={manual_verify}")
         with sync_playwright() as playwright:
             browser = playwright.chromium.launch(headless=headless)
             page = browser.new_page(viewport={"width": 1440, "height": 1200})
+            logger.info(f"Browser launched, navigating to explore page")
             page.goto(MIDJOURNEY_URL, wait_until="domcontentloaded", timeout=90000)
             page.wait_for_timeout(5000)
+            logger.info(f"Explore page loaded")
 
             if _is_security_challenge(page):
                 if (not headless) and manual_verify:
-                    logger.warning("Security verification detected. Complete the challenge in the browser; waiting up to 120 seconds")
-                    if not _wait_for_security_clear(page, timeout_ms=120000):
-                        raise RuntimeError("Security verification not cleared within timeout")
-                    logger.info("Security verification cleared")
+                    logger.warning("Security verification detected on explore page")
+                    success = _manual_verification_prompt(page, location="explore")
+                    if not success:
+                        raise RuntimeError("Security verification not cleared within timeout at explore page")
+                    logger.info("Explore page verification cleared, continuing...")
                 else:
                     raise RuntimeError("Security verification page detected; run headed mode and clear manually")
 
+            logger.info("Attempting to dismiss onboarding modal")
             _dismiss_onboarding_modal(page)
 
+            logger.info("Collecting job URLs by scrolling explore page...")
             job_urls = _collect_job_urls(page)
+            logger.info(f"Found {len(job_urls)} job URLs")
             if not job_urls:
                 raise RuntimeError("No MidJourney job URLs discovered from explore page")
 
@@ -180,13 +215,15 @@ def get_random_prompt() -> str:
             logger.info(f"Selected MidJourney job URL: {selected_url}")
             page.goto(selected_url, wait_until="domcontentloaded", timeout=60000)
             page.wait_for_timeout(3000)
+            logger.info(f"Job page loaded")
 
             if _is_security_challenge(page):
                 if (not headless) and manual_verify:
-                    logger.warning("Security verification detected on job page. Complete it manually; waiting up to 120 seconds")
-                    if not _wait_for_security_clear(page, timeout_ms=120000):
+                    logger.warning("Security verification detected on job page")
+                    success = _manual_verification_prompt(page, location="job_page")
+                    if not success:
                         raise RuntimeError("Job page security verification not cleared within timeout")
-                    page.wait_for_timeout(1500)
+                    logger.info("Job page verification cleared, continuing...")
                 else:
                     raise RuntimeError("Security verification page detected on job URL")
 
