@@ -16,6 +16,7 @@ PROMPT_ENHANCER_MODEL = os.getenv("PROMPT_ENHANCER_MODEL", "gpt-4.1-mini")
 PROMPT_LOG_MAX_CHARS = int(os.getenv("PROMPT_LOG_MAX_CHARS", "260"))
 ENABLE_PROMPT_ENHANCER = os.getenv("ENABLE_PROMPT_ENHANCER", "true").lower() in {"1", "true", "yes"}
 BLOCKED_TOKENS = ["nsfw", "nude", "nudity", "gore", "blood"]
+PRIORITY_BASE_MODELS = ["Flux.1 D"]
 ALLOWED_BASE_MODEL_TOKENS = [
     "flux.1",
     "stable diffusion 1.5",
@@ -167,6 +168,8 @@ def _match_model_token(base_model: str, token: str) -> bool:
 def _is_allowed_base_model(base_model: str) -> bool:
     if not (base_model or "").strip():
         return False
+    if any(_match_model_token(base_model, token) for token in PRIORITY_BASE_MODELS):
+        return True
     if any(_match_model_token(base_model, token) for token in DISALLOWED_BASE_MODEL_TOKENS):
         return False
     return any(_match_model_token(base_model, token) for token in ALLOWED_BASE_MODEL_TOKENS)
@@ -216,7 +219,7 @@ def _prompts_from_civitai() -> list[str]:
     try:
         payload = _fetch_json(
             CIVITAI_IMAGES_API,
-            params={"limit": 100, "sort": "Most Reactions", "period": "Week"},
+            params={"limit": 20, "sort": "Most Reactions"},
         )
     except Exception as exc:
         logger.warning(f"Failed to load prompts from CivitAI API: {exc}")
