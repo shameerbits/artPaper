@@ -23,9 +23,10 @@ class Settings:
 
     def validate(self, command: str) -> None:
         missing: list[str] = []
+        upscaler_backend = os.getenv("UPSCALER_BACKEND", "realesrgan").strip().lower()
         if command in {"run_once", "run_loop", "generate_only"} and not self.openai_api_key:
             missing.append("OPENAI_API_KEY")
-        if command in {"run_once", "run_loop"} and not self.replicate_api_token:
+        if command in {"run_once", "run_loop"} and upscaler_backend == "replicate" and not self.replicate_api_token:
             missing.append("REPLICATE_API_TOKEN")
         if command in {"run_once", "run_loop"} and not (
             self.deviantart_access_token or self.deviantart_refresh_token

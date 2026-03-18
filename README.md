@@ -1,6 +1,6 @@
 # artPaper
 
-Simple local Python pipeline for selecting a Stable Diffusion-style prompt (from APIs/datasets plus a local generator), generating an image with OpenAI, upscaling it with Replicate, publishing it to DeviantArt, and recording metadata in SQLite.
+Simple local Python pipeline for selecting a Stable Diffusion-style prompt (from APIs/datasets plus a local generator), generating an image with OpenAI, upscaling it with local Real-ESRGAN (or Replicate), publishing it to DeviantArt, and recording metadata in SQLite.
 
 ## Project structure
 
@@ -53,6 +53,7 @@ export DEVIANTART_CLIENT_SECRET="..."
 export DEVIANTART_REFRESH_TOKEN="..."
 export DEVIANTART_ACCESS_TOKEN=""
 export DEVIANTART_USERNAME="me"
+export UPSCALER_BACKEND="realesrgan"
 export RUN_INTERVAL_MINUTES="60"
 export CIVITAI_IMAGES_API="https://civitai.com/api/v1/images"
 export PROMPT_API_TIMEOUT_SECONDS="15"
@@ -63,8 +64,16 @@ Notes:
 
 - DeviantArt uploads usually require a user-approved OAuth refresh token. Client ID and secret alone are not enough to publish on behalf of an account.
 - `DEVIANTART_ACCESS_TOKEN` is optional if you already have a fresh token and want to skip the refresh call.
+- `UPSCALER_BACKEND` supports `realesrgan` (default, local no-token upscaling), `realesrgan_local`, and `replicate`.
+- `REPLICATE_API_TOKEN` is only required when `UPSCALER_BACKEND=replicate`.
 - Prompt collection uses CivitAI-style API data first, then a local prompt generator, then `prompts.txt` fallback.
 - Selected prompts are enhanced with OpenAI (`gpt-4.1-mini` by default) for richer detail, lighting, and composition.
+
+Install local Real-ESRGAN dependencies when using local backend:
+
+```bash
+pip install realesrgan opencv-python-headless
+```
 
 ## Commands
 
