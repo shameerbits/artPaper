@@ -3,6 +3,7 @@ import random
 import re
 from pathlib import Path
 
+from openai import OpenAI
 import requests
 
 from utils.config import PROMPTS_FILE
@@ -10,14 +11,25 @@ from utils.logger import logger
 
 
 CIVITAI_IMAGES_API = os.getenv("CIVITAI_IMAGES_API", "https://civitai.com/api/v1/images")
-LEXICA_SEARCH_API = os.getenv("LEXICA_SEARCH_API", "https://lexica.art/api/v1/search")
 REQUEST_TIMEOUT_SECONDS = int(os.getenv("PROMPT_API_TIMEOUT_SECONDS", "15"))
+PROMPT_ENHANCER_MODEL = os.getenv("PROMPT_ENHANCER_MODEL", "gpt-4.1-mini")
+
+
+def _build_openai_client() -> OpenAI | None:
+    if not os.getenv("OPENAI_API_KEY"):
+        return None
+    return OpenAI()
+
+
+OPENAI_CLIENT = _build_openai_client()
 
 
 def _clean_prompt(text: str) -> str:
     if not text:
         return ""
-    text = bytes(text, "utf-8").decode("unicode_escape")
+    if "\\" in text:
+        safe_text = re.sub(r"\\(?![\\\"'abfnrtv0-7xuU])", r"\\\\", text)
+        text = bytes(safe_text, "utf-8").decode("unicode_escape")
     text = re.sub(r"\s+", " ", text).strip()
     text = text.removeprefix("/imagine prompt:").strip(" :")
     return text.strip('"')
@@ -70,30 +82,29 @@ def _prompts_from_civitai() -> list[str]:
     return sorted(prompts)
 
 
-def _prompts_from_lexica() -> list[str]:
-    queries = [
-        "cinematic portrait",
-        "digital art fantasy landscape",
-        "ultra detailed concept art",
-        "photoreal editorial lighting",
-        "surreal dreamscape",
-    ]
-    prompts: set[str] = set()
+def _enhance_prompt(prompt: str) -> str:
+    if OPENAI_CLIENT is None:
+        logger.warning("OPENAI_API_KEY not set; skipping GPT prompt enhancement")
+        return prompt
 
-    for query in queries:
-        try:
-            payload = _fetch_json(LEXICA_SEARCH_API, params={"q": query})
-        except Exception as exc:
-            logger.warning(f"Failed to load Lexica prompts for '{query}': {exc}")
-            continue
-
-        for image in payload.get("images", []):
-            candidate = _clean_prompt(str(image.get("prompt", "")))
-            if _is_valid_prompt(candidate):
-                prompts.add(candidate)
-
-    logger.info(f"Collected {len(prompts)} prompts from Lexica")
-    return sorted(prompts)
+    try:
+        response = OPENAI_CLIENT.responses.create(
+            model=PROMPT_ENHANCER_MODEL,
+            input=(
+                "Enhance this image prompt with rich details, lighting, and composition. "
+                "Return only one final prompt line, no markdown or explanations:\n"
+                f"{prompt}"
+            ),
+        )
+        enhanced = _clean_prompt(response.output_text.strip())
+        if _is_valid_prompt(enhanced):
+            logger.info(f"Prompt enhanced with {PROMPT_ENHANCER_MODEL}")
+            return enhanced
+        logger.warning("GPT-enhanced prompt was invalid; using original prompt")
+        return prompt
+    except Exception as exc:
+        logger.warning(f"GPT prompt enhancement failed: {exc}")
+        return prompt
 
 
 def _generate_prompts(count: int = 30) -> list[str]:
@@ -170,24 +181,23 @@ def _dedupe(prompts: list[str]) -> list[str]:
 
 def get_random_prompt() -> str:
     civitai_prompts = _prompts_from_civitai()
-    lexica_prompts = _prompts_from_lexica()
     generated_prompts = _generate_prompts(count=40)
 
-    remote_prompts = _dedupe(civitai_prompts + lexica_prompts)
+    remote_prompts = _dedupe(civitai_prompts)
     if remote_prompts:
         selected = random.choice(remote_prompts)
         logger.info("Selected prompt from external Stable Diffusion prompt datasets/APIs")
-        return selected
+        return _enhance_prompt(selected)
 
     if generated_prompts:
         selected = random.choice(generated_prompts)
         logger.info("Selected prompt from local prompt generator")
-        return selected
+        return _enhance_prompt(selected)
 
     fallback = _fallback_prompts()
     if fallback:
         logger.warning("Prompt APIs unavailable; using prompts.txt fallback")
-        return random.choice(fallback)
+        return _enhance_prompt(random.choice(fallback))
 
     raise RuntimeError("No prompts available from APIs, generator, or prompts.txt")
 
