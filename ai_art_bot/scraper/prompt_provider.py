@@ -13,6 +13,7 @@ from utils.logger import logger
 CIVITAI_IMAGES_API = os.getenv("CIVITAI_IMAGES_API", "https://civitai.com/api/v1/images")
 REQUEST_TIMEOUT_SECONDS = int(os.getenv("PROMPT_API_TIMEOUT_SECONDS", "15"))
 PROMPT_ENHANCER_MODEL = os.getenv("PROMPT_ENHANCER_MODEL", "gpt-4.1-mini")
+PROMPT_LOG_MAX_CHARS = int(os.getenv("PROMPT_LOG_MAX_CHARS", "260"))
 
 
 def _build_openai_client() -> OpenAI | None:
@@ -22,6 +23,12 @@ def _build_openai_client() -> OpenAI | None:
 
 
 OPENAI_CLIENT = _build_openai_client()
+
+
+def _preview(text: str, max_chars: int = PROMPT_LOG_MAX_CHARS) -> str:
+    if len(text) <= max_chars:
+        return text
+    return f"{text[:max_chars]}..."
 
 
 def _clean_prompt(text: str) -> str:
@@ -99,6 +106,7 @@ def _enhance_prompt(prompt: str) -> str:
         enhanced = _clean_prompt(response.output_text.strip())
         if _is_valid_prompt(enhanced):
             logger.info(f"Prompt enhanced with {PROMPT_ENHANCER_MODEL}")
+            logger.info(f"Enhanced prompt preview: {_preview(enhanced)}")
             return enhanced
         logger.warning("GPT-enhanced prompt was invalid; using original prompt")
         return prompt
@@ -186,18 +194,26 @@ def get_random_prompt() -> str:
     remote_prompts = _dedupe(civitai_prompts)
     if remote_prompts:
         selected = random.choice(remote_prompts)
-        logger.info("Selected prompt from external Stable Diffusion prompt datasets/APIs")
+        source = "civitai"
+        logger.info(f"Selected prompt source: {source}")
+        logger.info(f"Selected base prompt preview: {_preview(selected)}")
         return _enhance_prompt(selected)
 
     if generated_prompts:
         selected = random.choice(generated_prompts)
-        logger.info("Selected prompt from local prompt generator")
+        source = "local_generator"
+        logger.info(f"Selected prompt source: {source}")
+        logger.info(f"Selected base prompt preview: {_preview(selected)}")
         return _enhance_prompt(selected)
 
     fallback = _fallback_prompts()
     if fallback:
         logger.warning("Prompt APIs unavailable; using prompts.txt fallback")
-        return _enhance_prompt(random.choice(fallback))
+        selected = random.choice(fallback)
+        source = "prompts_txt"
+        logger.info(f"Selected prompt source: {source}")
+        logger.info(f"Selected base prompt preview: {_preview(selected)}")
+        return _enhance_prompt(selected)
 
     raise RuntimeError("No prompts available from APIs, generator, or prompts.txt")
 
