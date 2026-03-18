@@ -16,8 +16,14 @@ PROMPT_ENHANCER_MODEL = os.getenv("PROMPT_ENHANCER_MODEL", "gpt-4.1-mini")
 PROMPT_LOG_MAX_CHARS = int(os.getenv("PROMPT_LOG_MAX_CHARS", "260"))
 ENABLE_PROMPT_ENHANCER = os.getenv("ENABLE_PROMPT_ENHANCER", "true").lower() in {"1", "true", "yes"}
 BLOCKED_TOKENS = ["nsfw", "nude", "nudity", "gore", "blood"]
-ALLOWED_BASE_MODEL_TOKENS = ["sdxl", "flux.1 d", "flux.1 s"]
-DISALLOWED_BASE_MODEL_TOKENS = ["sd 1.5", "anime", "pony"]
+ALLOWED_BASE_MODEL_TOKENS = [
+    "flux.1",
+    "stable diffusion 1.5",
+    "sd 1.5",
+    "stable diffusion xl",
+    "sdxl",
+]
+DISALLOWED_BASE_MODEL_TOKENS = ["anime", "pony"]
 NOISE_KEYWORDS = {
     "masterpiece",
     "best quality",
@@ -140,13 +146,30 @@ def _is_valid_prompt(text: str) -> bool:
     return _is_prompt_length_valid(text) and not _is_blocked_prompt(text)
 
 
+def _normalize_match_text(text: str) -> str:
+    normalized = text.replace("&", " and ").casefold()
+    normalized = re.sub(r"\s+", " ", normalized).strip()
+    return normalized
+
+
+def _match_model_token(base_model: str, token: str) -> bool:
+    base_text = _normalize_match_text(base_model)
+    token_text = _normalize_match_text(token)
+
+    # Support compound tokens like "foo & bar" where both fragments must exist.
+    if "&" in token:
+        parts = [_normalize_match_text(part) for part in token.split("&") if part.strip()]
+        return all(part in base_text for part in parts)
+
+    return token_text in base_text
+
+
 def _is_allowed_base_model(base_model: str) -> bool:
-    normalized = (base_model or "").strip().lower()
-    if not normalized:
+    if not (base_model or "").strip():
         return False
-    if any(token in normalized for token in DISALLOWED_BASE_MODEL_TOKENS):
+    if any(_match_model_token(base_model, token) for token in DISALLOWED_BASE_MODEL_TOKENS):
         return False
-    return any(token in normalized for token in ALLOWED_BASE_MODEL_TOKENS)
+    return any(_match_model_token(base_model, token) for token in ALLOWED_BASE_MODEL_TOKENS)
 
 
 def _select_safe_prompt(prompts: list[str], source: str) -> str | None:
