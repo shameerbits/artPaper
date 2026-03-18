@@ -181,8 +181,9 @@ def _manual_verification_prompt(page, location: str = "explore") -> bool:
 
 def get_random_prompt() -> str:
     try:
-        headless = os.getenv("MIDJOURNEY_HEADLESS", "true").lower() not in {"0", "false", "no"}
-        manual_verify = os.getenv("MIDJOURNEY_MANUAL_VERIFY", "true").lower() in {"1", "true", "yes"}
+        # Hardcoded for debugging - remove after testing
+        headless = False
+        manual_verify = True
         logger.info(f"MidJourney scraper starting. headless={headless}, manual_verify={manual_verify}")
         with sync_playwright() as playwright:
             browser = playwright.chromium.launch(headless=headless)
