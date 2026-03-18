@@ -55,15 +55,16 @@ export DEVIANTART_ACCESS_TOKEN=""
 export DEVIANTART_USERNAME="me"
 export RUN_INTERVAL_MINUTES="60"
 export CIVITAI_IMAGES_API="https://civitai.com/api/v1/images"
-export LEXICA_SEARCH_API="https://lexica.art/api/v1/search"
 export PROMPT_API_TIMEOUT_SECONDS="15"
+export PROMPT_ENHANCER_MODEL="gpt-4.1-mini"
 ```
 
 Notes:
 
 - DeviantArt uploads usually require a user-approved OAuth refresh token. Client ID and secret alone are not enough to publish on behalf of an account.
 - `DEVIANTART_ACCESS_TOKEN` is optional if you already have a fresh token and want to skip the refresh call.
-- Prompt collection uses CivitAI-style API data first, then Lexica-style prompt search, then a local prompt generator, then `prompts.txt` fallback.
+- Prompt collection uses CivitAI-style API data first, then a local prompt generator, then `prompts.txt` fallback.
+- Selected prompts are enhanced with OpenAI (`gpt-4.1-mini` by default) for richer detail, lighting, and composition.
 
 ## Commands
 
