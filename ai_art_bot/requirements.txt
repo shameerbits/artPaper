@@ -17,3 +17,7 @@ replicate==1.0.4
 requests==2.32.3
 opencv-python==4.11.0.86
 uvicorn==0.34.0
+
+# Optional accelerated ONNX backends (install only one based on your platform):
+# onnxruntime-directml==1.22.0
+# onnxruntime-openvino==1.22.0

@@ -54,6 +54,17 @@ export DEVIANTART_REFRESH_TOKEN="..."
 export DEVIANTART_ACCESS_TOKEN=""
 export DEVIANTART_USERNAME="me"
 export UPSCALER_BACKEND="realesrgan"
+export REALESRGAN_TILE="256"
+export REALESRGAN_TILE_PAD="10"
+export REALESRGAN_PRE_PAD="0"
+export REALESRGAN_MAX_INPUT_SIDE="0"
+export REALESRGAN_MAX_INPUT_PIXELS="0"
+export ACCEL_ONNX_MODEL_PATH=""
+export ACCEL_ONNX_MODEL_URL=""
+export ACCEL_TILE="0"
+export ACCEL_TILE_PAD="8"
+export OPENVINO_DEVICE="GPU_FP32"
+export DIRECTML_DEVICE_ID="0"
 export RUN_INTERVAL_MINUTES="60"
 export CIVITAI_IMAGES_API="https://civitai.com/api/v1/images"
 export PROMPT_API_TIMEOUT_SECONDS="15"
@@ -64,8 +75,12 @@ Notes:
 
 - DeviantArt uploads usually require a user-approved OAuth refresh token. Client ID and secret alone are not enough to publish on behalf of an account.
 - `DEVIANTART_ACCESS_TOKEN` is optional if you already have a fresh token and want to skip the refresh call.
-- `UPSCALER_BACKEND` supports `realesrgan` (default, local no-token upscaling), `realesrgan_local`, and `replicate`.
+- `UPSCALER_BACKEND` supports `realesrgan` (default, local no-token upscaling), `realesrgan_local`, `replicate`, `directml`, and `openvino`.
+- `REALESRGAN_TILE` defaults to `256` and dramatically lowers peak RAM usage on CPU compared to full-frame (`0`) inference.
+- `REALESRGAN_MAX_INPUT_SIDE` and `REALESRGAN_MAX_INPUT_PIXELS` are optional safety limits to pre-downscale very large inputs before upscaling.
 - `REPLICATE_API_TOKEN` is only required when `UPSCALER_BACKEND=replicate`.
+- `ACCEL_ONNX_MODEL_PATH` (or `ACCEL_ONNX_MODEL_URL`) is required when `UPSCALER_BACKEND` is `directml` or `openvino`.
+- `ACCEL_TILE` can be enabled for accelerated backends to process very large images in chunks.
 - Prompt collection uses CivitAI-style API data first, then a local prompt generator, then `prompts.txt` fallback.
 - Selected prompts are enhanced with OpenAI (`gpt-4.1-mini` by default) for richer detail, lighting, and composition.
 
@@ -73,6 +88,16 @@ Install local Real-ESRGAN dependencies when using local backend:
 
 ```bash
 pip install realesrgan opencv-python-headless
+```
+
+Install accelerated backend dependencies (choose one path):
+
+```bash
+# Windows + Intel/AMD/NVIDIA via DirectML
+pip install onnxruntime-directml
+
+# OpenVINO Execution Provider
+pip install onnxruntime-openvino
 ```
 
 ## Commands
