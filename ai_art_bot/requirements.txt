@@ -1,9 +1,17 @@
+--index-url https://pypi.org/simple
+--extra-index-url https://download.pytorch.org/whl/cpu
+
+torch==2.1.2+cpu
+torchvision==0.16.2+cpu
+torchaudio==2.1.2+cpu
+
 fastapi==0.115.12
 loguru==0.7.3
 openai==1.68.2
 pillow==11.1.0
 realesrgan==0.3.0
+basicsr==1.4.2
 replicate==1.0.4
 requests==2.32.3
-opencv-python-headless==4.11.0.86
+opencv-python==4.13.0.92
 uvicorn==0.34.0
