@@ -15,6 +15,7 @@ ACCEL_ONNX_MODEL_URL = os.getenv("ACCEL_ONNX_MODEL_URL", "").strip()
 ACCEL_MODEL_CACHE_DIR = Path(
     os.getenv("ACCEL_MODEL_CACHE_DIR", str(Path(UPSCALED_DIR).parent / "models"))
 )
+ACCEL_DEFAULT_MODEL_PATH = Path(os.getenv("ACCEL_DEFAULT_MODEL_PATH", str(Path(UPSCALED_DIR).parent / "weights" / "realesrgan_x4.onnx")))
 ACCEL_TILE = max(int(os.getenv("ACCEL_TILE", "0")), 0)
 ACCEL_TILE_PAD = max(int(os.getenv("ACCEL_TILE_PAD", "8")), 0)
 OPENVINO_DEVICE = os.getenv("OPENVINO_DEVICE", "GPU_FP32").strip() or "GPU_FP32"
@@ -33,9 +34,16 @@ def _resolve_model_path() -> Path:
             raise RuntimeError(f"ACCEL_ONNX_MODEL_PATH does not exist: {model_path}")
         return model_path
 
+    if ACCEL_DEFAULT_MODEL_PATH.exists():
+        logger.info(f"Using default ONNX model path: {ACCEL_DEFAULT_MODEL_PATH}")
+        return ACCEL_DEFAULT_MODEL_PATH
+
     if not ACCEL_ONNX_MODEL_URL:
         raise RuntimeError(
-            "No ONNX model configured for accelerated upscaler. Set ACCEL_ONNX_MODEL_PATH or ACCEL_ONNX_MODEL_URL."
+            "No ONNX model configured for accelerated upscaler. "
+            "Provide ACCEL_ONNX_MODEL_PATH, ACCEL_ONNX_MODEL_URL, "
+            "or place model at the default path: "
+            f"{ACCEL_DEFAULT_MODEL_PATH}"
         )
 
     ACCEL_MODEL_CACHE_DIR.mkdir(parents=True, exist_ok=True)

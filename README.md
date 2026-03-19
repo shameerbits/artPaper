@@ -61,6 +61,7 @@ export REALESRGAN_MAX_INPUT_SIDE="0"
 export REALESRGAN_MAX_INPUT_PIXELS="0"
 export ACCEL_ONNX_MODEL_PATH=""
 export ACCEL_ONNX_MODEL_URL=""
+export ACCEL_DEFAULT_MODEL_PATH=""
 export ACCEL_TILE="0"
 export ACCEL_TILE_PAD="8"
 export OPENVINO_DEVICE="GPU_FP32"
@@ -80,6 +81,8 @@ Notes:
 - `REALESRGAN_MAX_INPUT_SIDE` and `REALESRGAN_MAX_INPUT_PIXELS` are optional safety limits to pre-downscale very large inputs before upscaling.
 - `REPLICATE_API_TOKEN` is only required when `UPSCALER_BACKEND=replicate`.
 - `ACCEL_ONNX_MODEL_PATH` (or `ACCEL_ONNX_MODEL_URL`) is required when `UPSCALER_BACKEND` is `directml` or `openvino`.
+- If `ACCEL_ONNX_MODEL_PATH` is empty, the app auto-uses `ai_art_bot/weights/realesrgan_x4.onnx` when that file exists.
+- `ACCEL_DEFAULT_MODEL_PATH` can override this default local model location.
 - `ACCEL_TILE` can be enabled for accelerated backends to process very large images in chunks.
 - Prompt collection uses CivitAI-style API data first, then a local prompt generator, then `prompts.txt` fallback.
 - Selected prompts are enhanced with OpenAI (`gpt-4.1-mini` by default) for richer detail, lighting, and composition.
