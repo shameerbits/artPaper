@@ -83,6 +83,19 @@ def _prepare_input(image_bgr: np.ndarray) -> np.ndarray:
     return np.transpose(image_float, (2, 0, 1))[None, ...]
 
 
+def _fixed_input_hw(session) -> tuple[int, int] | None:
+    model_input = session.get_inputs()[0]
+    shape = getattr(model_input, "shape", None)
+    if not isinstance(shape, (list, tuple)) or len(shape) != 4:
+        return None
+
+    in_h = shape[2]
+    in_w = shape[3]
+    if isinstance(in_h, int) and isinstance(in_w, int) and in_h > 0 and in_w > 0:
+        return in_h, in_w
+    return None
+
+
 def _run_model(session, image_bgr: np.ndarray) -> np.ndarray:
     input_tensor = _prepare_input(image_bgr)
     model_input = session.get_inputs()[0]
@@ -111,33 +124,62 @@ def _run_model(session, image_bgr: np.ndarray) -> np.ndarray:
     return cv2.cvtColor(output_uint8, cv2.COLOR_RGB2BGR)
 
 
-def _run_model_tiled(session, image_bgr: np.ndarray, tile: int, tile_pad: int) -> np.ndarray:
+def _run_model_tiled(
+    session,
+    image_bgr: np.ndarray,
+    tile_h: int,
+    tile_w: int,
+    tile_pad: int,
+    fixed_hw: tuple[int, int] | None = None,
+) -> np.ndarray:
     height, width = image_bgr.shape[:2]
     out_image = None
     scale_x = 0.0
     scale_y = 0.0
 
-    for y in range(0, height, tile):
-        for x in range(0, width, tile):
+    for y in range(0, height, tile_h):
+        for x in range(0, width, tile_w):
             in_x0 = max(x - tile_pad, 0)
             in_y0 = max(y - tile_pad, 0)
-            in_x1 = min(x + tile + tile_pad, width)
-            in_y1 = min(y + tile + tile_pad, height)
+            in_x1 = min(x + tile_w + tile_pad, width)
+            in_y1 = min(y + tile_h + tile_pad, height)
 
             patch = image_bgr[in_y0:in_y1, in_x0:in_x1]
+            patch_h, patch_w = patch.shape[:2]
+            model_in_h = patch_h
+            model_in_w = patch_w
+
+            if fixed_hw is not None:
+                model_in_h, model_in_w = fixed_hw
+                if patch_h > model_in_h or patch_w > model_in_w:
+                    raise RuntimeError(
+                        f"Patch size {patch_w}x{patch_h} exceeds fixed model input {model_in_w}x{model_in_h}."
+                    )
+                if patch_h != model_in_h or patch_w != model_in_w:
+                    pad_bottom = model_in_h - patch_h
+                    pad_right = model_in_w - patch_w
+                    patch = cv2.copyMakeBorder(
+                        patch,
+                        0,
+                        pad_bottom,
+                        0,
+                        pad_right,
+                        cv2.BORDER_REFLECT_101,
+                    )
+
             patch_out = _run_model(session, patch)
 
             if scale_x == 0.0 or scale_y == 0.0:
-                scale_x = patch_out.shape[1] / float(patch.shape[1])
-                scale_y = patch_out.shape[0] / float(patch.shape[0])
+                scale_x = patch_out.shape[1] / float(model_in_w)
+                scale_y = patch_out.shape[0] / float(model_in_h)
                 out_h = int(round(height * scale_y))
                 out_w = int(round(width * scale_x))
                 out_image = np.zeros((out_h, out_w, 3), dtype=np.uint8)
 
             patch_inner_x0 = x - in_x0
             patch_inner_y0 = y - in_y0
-            patch_inner_x1 = patch_inner_x0 + min(tile, width - x)
-            patch_inner_y1 = patch_inner_y0 + min(tile, height - y)
+            patch_inner_x1 = patch_inner_x0 + min(tile_w, width - x)
+            patch_inner_y1 = patch_inner_y0 + min(tile_h, height - y)
 
             out_inner_x0 = int(round(patch_inner_x0 * scale_x))
             out_inner_y0 = int(round(patch_inner_y0 * scale_y))
@@ -165,8 +207,30 @@ def _upscale_with_provider(image_path: str, provider: str, output_prefix: str) -
     session = _create_session(model_path, provider)
     logger.info(f"Accelerated ONNX upscaling with provider={provider}, model={model_path}")
 
-    if ACCEL_TILE > 0:
-        output = _run_model_tiled(session, image, ACCEL_TILE, ACCEL_TILE_PAD)
+    fixed_hw = _fixed_input_hw(session)
+    if fixed_hw is not None:
+        logger.info(f"Detected fixed ONNX input size: {fixed_hw[1]}x{fixed_hw[0]}")
+
+    effective_tile_h = ACCEL_TILE
+    effective_tile_w = ACCEL_TILE
+    effective_tile_pad = ACCEL_TILE_PAD
+
+    if fixed_hw is not None:
+        fixed_h, fixed_w = fixed_hw
+        effective_tile_h = fixed_h
+        effective_tile_w = fixed_w
+        effective_tile_pad = 0
+        logger.info("Using fixed-input tiled inference for ONNX model.")
+
+    if fixed_hw is not None or ACCEL_TILE > 0:
+        output = _run_model_tiled(
+            session,
+            image,
+            tile_h=effective_tile_h,
+            tile_w=effective_tile_w,
+            tile_pad=effective_tile_pad,
+            fixed_hw=fixed_hw,
+        )
     else:
         output = _run_model(session, image)
 
