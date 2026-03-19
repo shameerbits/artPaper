@@ -1,6 +1,6 @@
 import base64
 import os
-from datetime import datetime, UTC
+from datetime import datetime, timezone
 from io import BytesIO
 from pathlib import Path
 
@@ -52,7 +52,7 @@ def generate_image(prompt: str) -> str:
     image_base64 = response.data[0].b64_json
     image_bytes = base64.b64decode(image_base64)
     wallpaper_bytes = _to_mobile_wallpaper(image_bytes)
-    filename = f"generated_{datetime.now(UTC).strftime('%Y%m%d_%H%M%S')}.png"
+    filename = f"generated_{datetime.now(timezone.utc).strftime('%Y%m%d_%H%M%S')}.png"
     output_path = Path(GENERATED_DIR) / filename
     output_path.write_bytes(wallpaper_bytes)
     logger.info(f"Generated image saved to {output_path}")

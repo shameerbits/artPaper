@@ -1,5 +1,5 @@
 import sqlite3
-from datetime import datetime, UTC
+from datetime import datetime, timezone
 
 from utils.config import DB_PATH, ensure_directories
 
@@ -33,7 +33,7 @@ def save_image_record(
     upscaled_path: str | None = None,
     uploaded: bool = False,
 ) -> int:
-    timestamp = datetime.now(UTC).isoformat()
+    timestamp = datetime.now(timezone.utc).isoformat()
     with _connect() as connection:
         cursor = connection.execute(
             """

@@ -1,5 +1,5 @@
 import os
-from datetime import datetime, UTC
+from datetime import datetime, timezone
 from pathlib import Path
 
 import replicate
@@ -36,7 +36,7 @@ REALESRGAN_MODEL_CONFIG = {
 
 
 def _build_output_path() -> Path:
-    filename = f"upscaled_{datetime.now(UTC).strftime('%Y%m%d_%H%M%S')}.png"
+    filename = f"upscaled_{datetime.now(timezone.utc).strftime('%Y%m%d_%H%M%S')}.png"
     return Path(UPSCALED_DIR) / filename
 
 
