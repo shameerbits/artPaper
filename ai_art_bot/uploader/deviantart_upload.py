@@ -152,33 +152,42 @@ def _get_access_token() -> str:
     if cached_access and expires_at > int(time.time()) + 30:
         return cached_access
 
-    refresh_token = settings.deviantart_refresh_token or cached_tokens.get("refresh_token", "")
-    if not refresh_token:
+    cached_refresh = str(cached_tokens.get("refresh_token", "") or "").strip()
+    env_refresh = str(settings.deviantart_refresh_token or "").strip()
+
+    # Prefer cached refresh token first because DeviantArt can rotate refresh tokens.
+    refresh_candidates = [token for token in (cached_refresh, env_refresh) if token]
+    if not refresh_candidates:
         raise RuntimeError(
             "No DeviantArt refresh token found. Run 'python app.py auth_deviantart' to authorize and cache tokens."
         )
 
-    response = requests.post(
-        TOKEN_URL,
-        data={
-            "grant_type": "refresh_token",
-            "refresh_token": refresh_token,
-            "client_id": settings.deviantart_client_id,
-            "client_secret": settings.deviantart_client_secret,
-        },
-        timeout=60,
-    )
-    if not response.ok:
-        message = (
-            f"Failed to refresh DeviantArt access token ({response.status_code}). "
-            f"Response: {response.text}. "
-            "Verify DEVIANTART_CLIENT_ID, DEVIANTART_CLIENT_SECRET, DEVIANTART_REFRESH_TOKEN, "
-            "and ensure the token was generated for this exact app."
+    last_error: str = ""
+    for refresh_token in refresh_candidates:
+        response = requests.post(
+            TOKEN_URL,
+            data={
+                "grant_type": "refresh_token",
+                "refresh_token": refresh_token,
+                "client_id": settings.deviantart_client_id,
+                "client_secret": settings.deviantart_client_secret,
+            },
+            timeout=60,
         )
-        raise RuntimeError(message)
-    payload = response.json()
-    _persist_token_payload(payload, fallback_refresh_token=refresh_token)
-    return payload["access_token"]
+        if response.ok:
+            payload = response.json()
+            _persist_token_payload(payload, fallback_refresh_token=refresh_token)
+            return payload["access_token"]
+
+        last_error = f"{response.status_code}: {response.text}"
+        logger.warning("DeviantArt token refresh failed for one refresh token candidate; trying fallback if available")
+
+    message = (
+        "Failed to refresh DeviantArt access token using all available refresh tokens. "
+        f"Last error: {last_error}. "
+        "Run 'python app.py auth_deviantart' to re-authorize and refresh cached tokens."
+    )
+    raise RuntimeError(message)
 
 
 def upload_image(image_path: str, prompt: str) -> dict:
