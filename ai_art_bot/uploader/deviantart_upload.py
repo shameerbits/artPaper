@@ -184,7 +184,7 @@ def _get_access_token() -> str:
 def upload_image(image_path: str, prompt: str) -> dict:
     token = _get_access_token()
     headers = {"Authorization": f"Bearer {token}"}
-    title = prompt[:80].strip() or "AI Art Upload"
+    title = prompt[:50].strip() or "AI Art Upload"
     tags = "ai,art,automation"
 
     with Path(image_path).open("rb") as image_file:
@@ -194,14 +194,17 @@ def upload_image(image_path: str, prompt: str) -> dict:
             data={
                 "title": title,
                 "artist_comments": prompt[:1000],
-                "folder": "",
                 "keywords": tags,
                 "is_mature": "false",
             },
             files={"file": (Path(image_path).name, image_file, "image/png")},
             timeout=180,
         )
-    submit_response.raise_for_status()
+    if not submit_response.ok:
+        raise RuntimeError(
+            "DeviantArt stash submit failed "
+            f"({submit_response.status_code}). Response: {submit_response.text}"
+        )
     itemid = submit_response.json().get("itemid")
     if not itemid:
         raise RuntimeError(f"Unexpected DeviantArt submit response: {submit_response.text}")
@@ -227,7 +230,11 @@ def upload_image(image_path: str, prompt: str) -> dict:
         },
         timeout=60,
     )
-    publish_response.raise_for_status()
+    if not publish_response.ok:
+        raise RuntimeError(
+            "DeviantArt stash publish failed "
+            f"({publish_response.status_code}). Response: {publish_response.text}"
+        )
     payload = publish_response.json()
     logger.info("Uploaded image to DeviantArt")
     return payload
