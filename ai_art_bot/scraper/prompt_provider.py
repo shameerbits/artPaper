@@ -15,7 +15,24 @@ REQUEST_TIMEOUT_SECONDS = int(os.getenv("PROMPT_API_TIMEOUT_SECONDS", "15"))
 PROMPT_ENHANCER_MODEL = os.getenv("PROMPT_ENHANCER_MODEL", "gpt-4.1-mini")
 PROMPT_LOG_MAX_CHARS = int(os.getenv("PROMPT_LOG_MAX_CHARS", "260"))
 ENABLE_PROMPT_ENHANCER = os.getenv("ENABLE_PROMPT_ENHANCER", "true").lower() in {"1", "true", "yes"}
-BLOCKED_TOKENS = ["nsfw", "nude", "nudity", "gore", "blood"]
+BLOCKED_TOKENS = [
+    # General human references (broad filter as you requested)
+    "woman", "women", "girl", "girls", "female", "lady",
+
+    # Sexual / NSFW
+    "nsfw", "nude", "nudity", "porn", "explicit", "sex", "sexual",
+    "erotic", "hentai", "fetish", "lewd",
+
+    # Minor safety
+    "loli", "shota", "underage", "child", "teen",
+
+    # Violence / gore
+    "gore", "blood", "bloody", "dismemberment", "decapitation",
+    "corpse", "dead body", "mutilation",
+
+    # Extreme / disturbing
+    "rape", "abuse", "torture", "suicide", "self harm"
+]
 PRIORITY_BASE_MODELS = ["Flux.1 D", "SDXL Hyper"]
 ALLOWED_BASE_MODEL_TOKENS = [
     "flux.1",
