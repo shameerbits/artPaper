@@ -10,28 +10,32 @@ from utils.config import PROMPTS_FILE
 from utils.logger import logger
 
 
-CIVITAI_IMAGES_API = os.getenv("CIVITAI_IMAGES_API", "https://civitai.com/api/v1/images?nsfw=false&sort=Newest&limit=20&page=1")
+CIVITAI_IMAGES_API = os.getenv("CIVITAI_IMAGES_API", "https://civitai.com/api/v1/images")
 REQUEST_TIMEOUT_SECONDS = int(os.getenv("PROMPT_API_TIMEOUT_SECONDS", "15"))
-PROMPT_ENHANCER_MODEL = os.getenv("PROMPT_ENHANCER_MODEL", "gpt-4.1-mini")
+PROMPT_ENHANCER_MODEL = os.getenv("PROMPT_ENHANCER_MODEL", "gpt-5.2")
 PROMPT_LOG_MAX_CHARS = int(os.getenv("PROMPT_LOG_MAX_CHARS", "260"))
 ENABLE_PROMPT_ENHANCER = os.getenv("ENABLE_PROMPT_ENHANCER", "true").lower() in {"1", "true", "yes"}
+CIVITAI_QUERY_CHOICES = [
+    "photography",
+    "animals",
+    "nature",
+    "cartoon",
+    "wildlife",
+    "landscape",
+    "macro",
+    "cinematic",
+    "fantasy",
+    "sci-fi",
+    "architecture",
+    "underwater",
+    "forest",
+    "mountains",
+    "birds",
+    "ocean",
+]
 BLOCKED_TOKENS = [
     # General human references (broad filter as you requested)
-    "woman", "women", "girl", "girls", "female", "lady",
-
-    # Sexual / NSFW
-    "nsfw", "nude", "nudity", "porn", "explicit", "sex", "sexual",
-    "erotic", "hentai", "fetish", "lewd",
-
-    # Minor safety
-    "loli", "shota", "underage", "child", "teen",
-
-    # Violence / gore
-    "gore", "blood", "bloody", "dismemberment", "decapitation",
-    "corpse", "dead body", "mutilation",
-
-    # Extreme / disturbing
-    "rape", "abuse", "torture", "suicide", "self harm"
+    "woman", "women", "girl", "girls", "female", "lady"
 ]
 PRIORITY_BASE_MODELS = ["Illustrious", "Flux1", "Flux.1 D", "SDXL Hyper", "anime", "Pony", "SDXL 1.0", "OpenAI"]
 ALLOWED_BASE_MODEL_TOKENS = [
@@ -237,11 +241,30 @@ def _fetch_json(url: str, params: dict | None = None) -> dict:
     return response.json()
 
 
+def _build_civitai_params() -> dict[str, str | int]:
+    return {
+        "nsfw": "false",
+        "limit": 20,
+        "page": random.randint(1, 20),
+        "sort": random.choice(["Newest", "Most Reactions"]),
+        "query": random.choice(CIVITAI_QUERY_CHOICES),
+        "minLikes": 20,
+    }
+
+
 def _prompts_from_civitai() -> list[str]:
     try:
+        request_params = _build_civitai_params()
         payload = _fetch_json(
             CIVITAI_IMAGES_API,
-            params={"limit": 20, "sort": "Most Reactions"},
+            params=request_params,
+        )
+        logger.info(
+            "CivitAI request params: "
+            f"page={request_params['page']}, "
+            f"sort={request_params['sort']}, "
+            f"query={request_params['query']}, "
+            f"minLikes={request_params['minLikes']}"
         )
     except Exception as exc:
         logger.warning(f"Failed to load prompts from CivitAI API: {exc}")
