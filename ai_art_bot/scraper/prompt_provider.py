@@ -10,7 +10,7 @@ from utils.config import PROMPTS_FILE
 from utils.logger import logger
 
 
-CIVITAI_IMAGES_API = os.getenv("CIVITAI_IMAGES_API", "https://civitai.com/api/v1/images")
+CIVITAI_IMAGES_API = os.getenv("CIVITAI_IMAGES_API", "https://civitai.com/api/v1/images?nsfw=false&sort=Newest&limit=20&page=1")
 REQUEST_TIMEOUT_SECONDS = int(os.getenv("PROMPT_API_TIMEOUT_SECONDS", "15"))
 PROMPT_ENHANCER_MODEL = os.getenv("PROMPT_ENHANCER_MODEL", "gpt-4.1-mini")
 PROMPT_LOG_MAX_CHARS = int(os.getenv("PROMPT_LOG_MAX_CHARS", "260"))
@@ -33,7 +33,7 @@ BLOCKED_TOKENS = [
     # Extreme / disturbing
     "rape", "abuse", "torture", "suicide", "self harm"
 ]
-PRIORITY_BASE_MODELS = ["Flux.1 D", "SDXL Hyper", "anime", "pony"]
+PRIORITY_BASE_MODELS = ["Illustrious", "Flux1", "Flux.1 D", "SDXL Hyper", "anime", "Pony", "SDXL 1.0", "OpenAI"]
 ALLOWED_BASE_MODEL_TOKENS = [
     "flux.1",
     "Flux.1 D",
@@ -41,7 +41,10 @@ ALLOWED_BASE_MODEL_TOKENS = [
     "SDXL 1.0",
     "sdxl",
     "anime",
-    "pony",
+    "Pony",
+    "Flux1",
+    "OpenAI",
+    "Illustrious",
 ]
 DISALLOWED_BASE_MODEL_TOKENS = ["remove-anime", "remove-pony"]
 NOISE_KEYWORDS = {
