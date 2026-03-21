@@ -1,6 +1,7 @@
 import os
 from dataclasses import dataclass
 from pathlib import Path
+import json
 
 
 BASE_DIR = Path(__file__).resolve().parents[1]
@@ -9,6 +10,7 @@ GENERATED_DIR = DATA_DIR / "generated"
 UPSCALED_DIR = DATA_DIR / "upscaled"
 PROMPTS_FILE = BASE_DIR / "prompts.txt"
 DB_PATH = DATA_DIR / "images.db"
+DEVIANTART_TOKENS_PATH = DATA_DIR / "deviantart_tokens.json"
 
 
 @dataclass(frozen=True)
@@ -24,12 +26,13 @@ class Settings:
     def validate(self, command: str) -> None:
         missing: list[str] = []
         upscaler_backend = os.getenv("UPSCALER_BACKEND", "realesrgan").strip().lower()
+        has_cached_deviantart_token = has_local_deviantart_tokens()
         if command in {"run_once", "run_loop", "generate_only"} and not self.openai_api_key:
             missing.append("OPENAI_API_KEY")
         if command in {"run_once", "run_loop"} and upscaler_backend == "replicate" and not self.replicate_api_token:
             missing.append("REPLICATE_API_TOKEN")
         if command in {"run_once", "run_loop"} and not (
-            self.deviantart_access_token or self.deviantart_refresh_token
+            self.deviantart_access_token or self.deviantart_refresh_token or has_cached_deviantart_token
         ):
             missing.append("DEVIANTART_ACCESS_TOKEN or DEVIANTART_REFRESH_TOKEN")
         if command in {"run_once", "run_loop"}:
@@ -45,6 +48,16 @@ class Settings:
 def ensure_directories() -> None:
     for directory in (DATA_DIR, GENERATED_DIR, UPSCALED_DIR):
         directory.mkdir(parents=True, exist_ok=True)
+
+
+def has_local_deviantart_tokens() -> bool:
+    if not DEVIANTART_TOKENS_PATH.exists():
+        return False
+    try:
+        payload = json.loads(DEVIANTART_TOKENS_PATH.read_text(encoding="utf-8"))
+    except Exception:
+        return False
+    return bool(payload.get("refresh_token") or payload.get("access_token"))
 
 
 def get_settings() -> Settings:

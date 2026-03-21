@@ -52,7 +52,9 @@ export DEVIANTART_CLIENT_ID="..."
 export DEVIANTART_CLIENT_SECRET="..."
 export DEVIANTART_REFRESH_TOKEN="..."
 export DEVIANTART_ACCESS_TOKEN=""
+export DEVIANTART_REDIRECT_URI="http://localhost:8501/callback"
 export DEVIANTART_USERNAME="me"
+export DEVIANTART_PUBLISH="true"
 export UPSCALER_BACKEND="realesrgan"
 export REALESRGAN_TILE="256"
 export REALESRGAN_TILE_PAD="10"
@@ -76,6 +78,9 @@ Notes:
 
 - DeviantArt uploads usually require a user-approved OAuth refresh token. Client ID and secret alone are not enough to publish on behalf of an account.
 - `DEVIANTART_ACCESS_TOKEN` is optional if you already have a fresh token and want to skip the refresh call.
+- You can bootstrap and cache DeviantArt tokens locally with `python app.py auth_deviantart` after setting only `DEVIANTART_CLIENT_ID` and `DEVIANTART_CLIENT_SECRET`.
+- Cached DeviantArt tokens are stored at `ai_art_bot/data/deviantart_tokens.json` and are auto-updated when DeviantArt rotates `refresh_token`.
+- `DEVIANTART_PUBLISH=false` enables upload test mode (stash submit only, publish skipped).
 - `UPSCALER_BACKEND` supports `realesrgan` (default, local no-token upscaling), `realesrgan_local`, `replicate`, `directml`, and `openvino`.
 - `REALESRGAN_TILE` defaults to `256` and dramatically lowers peak RAM usage on CPU compared to full-frame (`0`) inference.
 - `REALESRGAN_MAX_INPUT_SIDE` and `REALESRGAN_MAX_INPUT_PIXELS` are optional safety limits to pre-downscale very large inputs before upscaling.
@@ -109,6 +114,7 @@ pip install onnxruntime-openvino
 python app.py run_once
 python app.py run_loop --interval 90
 python app.py generate_only
+python app.py auth_deviantart
 python app.py serve --host 0.0.0.0 --port 8000
 ```
 

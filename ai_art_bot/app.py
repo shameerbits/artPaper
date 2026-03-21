@@ -6,7 +6,9 @@ from fastapi import FastAPI, HTTPException
 
 from database.db import list_images
 from scheduler.scheduler import PipelineRunner
+from uploader.deviantart_upload import bootstrap_tokens
 from utils.config import get_settings
+from utils.logger import logger
 from utils.logger import setup_logging
 
 
@@ -33,7 +35,7 @@ def main() -> None:
     parser = argparse.ArgumentParser(description="Automated AI art generation pipeline")
     parser.add_argument(
         "command",
-        choices=["run_once", "run_loop", "generate_only", "serve"],
+        choices=["run_once", "run_loop", "generate_only", "serve", "auth_deviantart"],
         help="Pipeline command to execute",
     )
     parser.add_argument(
@@ -57,6 +59,12 @@ def main() -> None:
 
     if args.command == "serve":
         uvicorn.run(build_dashboard(), host=args.host, port=args.port)
+        return
+
+    if args.command == "auth_deviantart":
+        payload = bootstrap_tokens()
+        has_refresh = bool(payload.get("refresh_token"))
+        logger.info(f"DeviantArt authorization complete. refresh_token_saved={has_refresh}")
         return
 
     get_settings().validate(args.command)
