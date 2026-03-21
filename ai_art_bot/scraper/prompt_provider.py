@@ -33,15 +33,17 @@ BLOCKED_TOKENS = [
     # Extreme / disturbing
     "rape", "abuse", "torture", "suicide", "self harm"
 ]
-PRIORITY_BASE_MODELS = ["Flux.1 D", "SDXL Hyper"]
+PRIORITY_BASE_MODELS = ["Flux.1 D", "SDXL Hyper", "anime", "pony"]
 ALLOWED_BASE_MODEL_TOKENS = [
     "flux.1",
     "Flux.1 D",
     "SDXL Hyper",
     "SDXL 1.0",
     "sdxl",
+    "anime",
+    "pony",
 ]
-DISALLOWED_BASE_MODEL_TOKENS = ["anime", "pony"]
+DISALLOWED_BASE_MODEL_TOKENS = ["remove-anime", "remove-pony"]
 NOISE_KEYWORDS = {
     "masterpiece",
     "best quality",
