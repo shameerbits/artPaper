@@ -23,6 +23,7 @@ LOCAL_SEED = int(os.getenv("LOCAL_SEED", "-1"))
 LOCAL_MODEL_USE_OPENVINO = os.getenv("LOCAL_MODEL_USE_OPENVINO", "false").strip().lower() in {"1", "true", "yes"}
 OPENVINO_DEVICE = os.getenv("OPENVINO_DEVICE", "GPU")
 OPENVINO_OOM_AUTO_RETRY = os.getenv("OPENVINO_OOM_AUTO_RETRY", "true").strip().lower() in {"1", "true", "yes"}
+OPENVINO_GPU_FALLBACK_TO_CPU = os.getenv("OPENVINO_GPU_FALLBACK_TO_CPU", "true").strip().lower() in {"1", "true", "yes"}
 OPENVINO_EXPORT_CACHE_DIR = Path(
     os.getenv("OPENVINO_EXPORT_CACHE_DIR", str(Path(GENERATED_DIR).parent / "models" / "openvino_cache"))
 )
@@ -49,6 +50,17 @@ def _is_openvino_memory_error(exc: Exception) -> bool:
         "exceed_allocatable_mem_size",
         "not enough memory",
         "out of memory",
+    )
+    return any(marker in message for marker in markers)
+
+
+def _is_openvino_gpu_runtime_error(exc: Exception) -> bool:
+    message = str(exc).lower()
+    markers = (
+        "clflush, error code: -5",
+        "clwaitforevents, error code: -14",
+        "ocl_stream.cpp",
+        "intel_gpu",
     )
     return any(marker in message for marker in markers)
 
@@ -170,6 +182,18 @@ def _load_local_pipeline(model_source: str, use_openvino: bool) -> Any:
             except Exception as exc:
                 logger.warning(f"Failed to persist OpenVINO export cache at {cached_export_dir}: {exc}")
 
+        # If cache exists, always reload from cache to avoid tempfile-backed exports on Windows.
+        if export_model and _is_openvino_export_dir(cached_export_dir):
+            try:
+                pipeline = openvino_pipeline_cls.from_pretrained(
+                    str(cached_export_dir),
+                    export=False,
+                    compile=False,
+                )
+                logger.info(f"Reloaded OpenVINO pipeline from cache: {cached_export_dir}")
+            except Exception as exc:
+                logger.warning(f"Failed to reload OpenVINO pipeline from cache {cached_export_dir}: {exc}")
+
         pipeline.to(OPENVINO_DEVICE)
     else:
         try:
@@ -240,6 +264,7 @@ def _generate_image_local(prompt: str) -> str:
         size_candidates = _openvino_size_candidates(LOCAL_IMAGE_WIDTH, LOCAL_IMAGE_HEIGHT)
         last_error: Exception | None = None
         result = None
+        did_cpu_fallback = False
         for width, height in size_candidates:
             try:
                 if width != LOCAL_IMAGE_WIDTH or height != LOCAL_IMAGE_HEIGHT:
@@ -252,6 +277,18 @@ def _generate_image_local(prompt: str) -> str:
                 break
             except Exception as exc:
                 last_error = exc
+                if (
+                    OPENVINO_GPU_FALLBACK_TO_CPU
+                    and not did_cpu_fallback
+                    and str(OPENVINO_DEVICE).upper().startswith("GPU")
+                    and _is_openvino_gpu_runtime_error(exc)
+                ):
+                    logger.warning(
+                        "OpenVINO GPU runtime failure detected; retrying on CPU backend for stability."
+                    )
+                    pipeline.to("CPU")
+                    did_cpu_fallback = True
+                    continue
                 if _is_openvino_memory_error(exc) and (width, height) != size_candidates[-1]:
                     continue
                 raise
