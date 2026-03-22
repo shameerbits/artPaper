@@ -47,6 +47,15 @@ pip install -r requirements.txt
 
 ```bash
 export OPENAI_API_KEY="..."
+export IMAGE_BACKEND="openai"
+export LOCAL_MODEL_ID="runwayml/stable-diffusion-v1-5"
+export LOCAL_MODEL_PATH=""
+export LOCAL_MODEL_USE_OPENVINO="false"
+export LOCAL_IMAGE_WIDTH="768"
+export LOCAL_IMAGE_HEIGHT="1344"
+export LOCAL_NUM_INFERENCE_STEPS="24"
+export LOCAL_GUIDANCE_SCALE="7.0"
+export LOCAL_SEED="-1"
 export REPLICATE_API_TOKEN="..."
 export DEVIANTART_CLIENT_ID="..."
 export DEVIANTART_CLIENT_SECRET="..."
@@ -92,6 +101,15 @@ Notes:
 - Prompt collection uses CivitAI-style API data first, then a local prompt generator, then `prompts.txt` fallback.
 - Selected prompts are enhanced with OpenAI (`gpt-4.1-mini` by default) for richer detail, lighting, and composition.
 
+Local image generation options:
+
+- `IMAGE_BACKEND=openai` keeps current behavior (OpenAI image API).
+- `IMAGE_BACKEND=local_sd` enables local Stable Diffusion generation.
+- `LOCAL_MODEL_ID` is a Hugging Face model id (default: `runwayml/stable-diffusion-v1-5`).
+- `LOCAL_MODEL_PATH` can point to a downloaded local model folder (overrides `LOCAL_MODEL_ID`).
+- `LOCAL_MODEL_USE_OPENVINO=true` enables OpenVINO backend for local SD generation.
+- For Iris Xe, start with `LOCAL_IMAGE_WIDTH=768`, `LOCAL_IMAGE_HEIGHT=1344`, and `LOCAL_NUM_INFERENCE_STEPS=20-24`.
+
 Install local Real-ESRGAN dependencies when using local backend:
 
 ```bash
@@ -108,12 +126,81 @@ pip install onnxruntime-directml
 pip install onnxruntime-openvino
 ```
 
+Install optional local SD generation dependencies:
+
+```bash
+pip install diffusers transformers accelerate safetensors huggingface_hub
+```
+
+Install optional OpenVINO local SD dependencies:
+
+```bash
+pip install "optimum-intel[openvino]"
+```
+
+## Local SD 1.5 quick start
+
+### 1) Download a local model
+
+Default SD 1.5 model:
+
+```bash
+python app.py download_model --model-id runwayml/stable-diffusion-v1-5
+```
+
+You can also download popular SD 1.5 derivatives from Hugging Face (when available):
+
+```bash
+python app.py download_model --model-id Lykon/dreamshaper-8
+```
+
+If you have a local model folder already, skip download and set `LOCAL_MODEL_PATH` directly.
+
+### 2) Switch generator to local
+
+```bash
+export IMAGE_BACKEND="local_sd"
+export LOCAL_MODEL_PATH="/absolute/path/to/your/model/folder"
+```
+
+or use a model id directly:
+
+```bash
+export IMAGE_BACKEND="local_sd"
+export LOCAL_MODEL_ID="runwayml/stable-diffusion-v1-5"
+```
+
+### 3) Enable OpenVINO for Intel Iris Xe (optional)
+
+```bash
+export LOCAL_MODEL_USE_OPENVINO="true"
+export OPENVINO_DEVICE="GPU"
+export LOCAL_IMAGE_WIDTH="768"
+export LOCAL_IMAGE_HEIGHT="1344"
+export LOCAL_NUM_INFERENCE_STEPS="20"
+```
+
+### 4) Generate using local model
+
+```bash
+python app.py generate_only
+```
+
+## Recommended SD 1.5 family models
+
+- Photorealism: EpicRealism, Juggernaut Aftermath.
+- Best all-arounder: DreamShaper 8.
+- Anime/digital art: MeinaMix.
+
+If a model is hosted on CivitAI as a single `.safetensors` file, convert/export it into a Diffusers-style folder before use, then point `LOCAL_MODEL_PATH` to that exported folder.
+
 ## Commands
 
 ```bash
 python app.py run_once
 python app.py run_loop --interval 90
 python app.py generate_only
+python app.py download_model --model-id runwayml/stable-diffusion-v1-5
 python app.py auth_deviantart
 python app.py serve --host 0.0.0.0 --port 8000
 ```

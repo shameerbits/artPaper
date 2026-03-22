@@ -18,6 +18,14 @@ requests==2.32.3
 opencv-python==4.11.0.86
 uvicorn==0.34.0
 
+# Optional local SD generation dependencies:
+# diffusers==0.32.2
+# transformers==4.49.0
+# accelerate==1.4.0
+# safetensors==0.5.3
+# huggingface_hub==0.29.1
+# optimum-intel[openvino]==1.24.0
+
 # Optional accelerated ONNX backends (install only one based on your platform):
 # onnxruntime-directml==1.22.0
 # onnxruntime-openvino==1.22.0

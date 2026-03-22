@@ -3,6 +3,7 @@ import os
 from datetime import datetime, timezone
 from io import BytesIO
 from pathlib import Path
+from typing import Any
 
 from openai import OpenAI
 from PIL import Image
@@ -14,6 +15,17 @@ from utils.logger import logger
 OPENAI_IMAGE_SIZE = os.getenv("OPENAI_IMAGE_SIZE", "1024x1536")
 WALLPAPER_WIDTH = int(os.getenv("WALLPAPER_WIDTH", "1080"))
 WALLPAPER_HEIGHT = int(os.getenv("WALLPAPER_HEIGHT", "1920"))
+LOCAL_IMAGE_WIDTH = int(os.getenv("LOCAL_IMAGE_WIDTH", str(WALLPAPER_WIDTH)))
+LOCAL_IMAGE_HEIGHT = int(os.getenv("LOCAL_IMAGE_HEIGHT", str(WALLPAPER_HEIGHT)))
+LOCAL_NUM_INFERENCE_STEPS = int(os.getenv("LOCAL_NUM_INFERENCE_STEPS", "24"))
+LOCAL_GUIDANCE_SCALE = float(os.getenv("LOCAL_GUIDANCE_SCALE", "7.0"))
+LOCAL_SEED = int(os.getenv("LOCAL_SEED", "-1"))
+LOCAL_MODEL_USE_OPENVINO = os.getenv("LOCAL_MODEL_USE_OPENVINO", "false").strip().lower() in {"1", "true", "yes"}
+OPENVINO_DEVICE = os.getenv("OPENVINO_DEVICE", "GPU")
+
+_LOCAL_PIPELINE: Any | None = None
+_LOCAL_PIPELINE_SOURCE: str | None = None
+_LOCAL_PIPELINE_USE_OPENVINO: bool | None = None
 
 
 def _to_mobile_wallpaper(image_bytes: bytes, width: int = WALLPAPER_WIDTH, height: int = WALLPAPER_HEIGHT) -> bytes:
@@ -42,7 +54,70 @@ def _to_mobile_wallpaper(image_bytes: bytes, width: int = WALLPAPER_WIDTH, heigh
         return output.getvalue()
 
 
-def generate_image(prompt: str) -> str:
+def _save_image_as_wallpaper(image: Image.Image) -> str:
+    output = BytesIO()
+    image.convert("RGB").save(output, format="PNG")
+    wallpaper_bytes = _to_mobile_wallpaper(output.getvalue())
+    filename = f"generated_{datetime.now(timezone.utc).strftime('%Y%m%d_%H%M%S')}.png"
+    output_path = Path(GENERATED_DIR) / filename
+    output_path.write_bytes(wallpaper_bytes)
+    logger.info(f"Generated image saved to {output_path}")
+    return str(output_path)
+
+
+def _resolve_model_source() -> str:
+    settings = get_settings()
+    return settings.local_model_path.strip() or settings.local_model_id.strip()
+
+
+def _load_local_pipeline(model_source: str, use_openvino: bool) -> Any:
+    global _LOCAL_PIPELINE, _LOCAL_PIPELINE_SOURCE, _LOCAL_PIPELINE_USE_OPENVINO
+    if (
+        _LOCAL_PIPELINE is not None
+        and _LOCAL_PIPELINE_SOURCE == model_source
+        and _LOCAL_PIPELINE_USE_OPENVINO == use_openvino
+    ):
+        return _LOCAL_PIPELINE
+
+    if use_openvino:
+        try:
+            from optimum.intel.openvino import OVDiffusionPipeline
+        except Exception as exc:
+            raise RuntimeError(
+                "OpenVINO local generation requires `optimum-intel[openvino]` and OpenVINO runtime. "
+                "Install optional local generation dependencies first."
+            ) from exc
+
+        source_path = Path(model_source)
+        export_model = not source_path.exists()
+        pipeline = OVDiffusionPipeline.from_pretrained(model_source, export=export_model)
+        pipeline.to(OPENVINO_DEVICE)
+    else:
+        try:
+            import torch
+            from diffusers import AutoPipelineForText2Image, DPMSolverMultistepScheduler
+        except Exception as exc:
+            raise RuntimeError(
+                "Local SD generation requires `diffusers`, `transformers`, `accelerate`, and `safetensors`. "
+                "Install optional local generation dependencies first."
+            ) from exc
+
+        pipeline = AutoPipelineForText2Image.from_pretrained(
+            model_source,
+            torch_dtype=torch.float32,
+            safety_checker=None,
+        )
+        pipeline.scheduler = DPMSolverMultistepScheduler.from_config(pipeline.scheduler.config)
+        pipeline = pipeline.to("cpu")
+
+    _LOCAL_PIPELINE = pipeline
+    _LOCAL_PIPELINE_SOURCE = model_source
+    _LOCAL_PIPELINE_USE_OPENVINO = use_openvino
+    logger.info(f"Loaded local model source={model_source} backend={'openvino' if use_openvino else 'diffusers'}")
+    return pipeline
+
+
+def _generate_image_openai(prompt: str) -> str:
     client = OpenAI(api_key=get_settings().openai_api_key)
     response = client.images.generate(
         model="gpt-image-1",
@@ -57,3 +132,65 @@ def generate_image(prompt: str) -> str:
     output_path.write_bytes(wallpaper_bytes)
     logger.info(f"Generated image saved to {output_path}")
     return str(output_path)
+
+
+def _generate_image_local(prompt: str) -> str:
+    model_source = _resolve_model_source()
+    if not model_source:
+        raise RuntimeError("No local model configured. Set LOCAL_MODEL_PATH or LOCAL_MODEL_ID.")
+
+    pipeline = _load_local_pipeline(model_source=model_source, use_openvino=LOCAL_MODEL_USE_OPENVINO)
+
+    generation_kwargs: dict[str, Any] = {
+        "prompt": prompt,
+        "num_inference_steps": LOCAL_NUM_INFERENCE_STEPS,
+        "guidance_scale": LOCAL_GUIDANCE_SCALE,
+        "width": LOCAL_IMAGE_WIDTH,
+        "height": LOCAL_IMAGE_HEIGHT,
+    }
+
+    if LOCAL_SEED >= 0 and not LOCAL_MODEL_USE_OPENVINO:
+        try:
+            import torch
+
+            generation_kwargs["generator"] = torch.Generator(device="cpu").manual_seed(LOCAL_SEED)
+        except Exception:
+            logger.warning("Failed to set LOCAL_SEED generator; continuing without deterministic seed")
+
+    result = pipeline(**generation_kwargs)
+    image = result.images[0]
+    return _save_image_as_wallpaper(image)
+
+
+def download_local_model(model_id: str | None = None, local_dir: str | None = None) -> str:
+    target_model = (model_id or get_settings().local_model_id).strip()
+    if not target_model:
+        raise RuntimeError("No model id provided. Pass --model-id or set LOCAL_MODEL_ID.")
+
+    destination = Path(local_dir).expanduser().resolve() if local_dir else (Path(__file__).resolve().parents[1] / "models")
+    destination.mkdir(parents=True, exist_ok=True)
+    model_slug = target_model.split("/")[-1]
+    target_path = destination / model_slug
+
+    try:
+        from huggingface_hub import snapshot_download
+    except Exception as exc:
+        raise RuntimeError("Model download requires `huggingface_hub`. Install optional local generation dependencies.") from exc
+
+    logger.info(f"Downloading model {target_model} to {target_path}")
+    snapshot_download(
+        repo_id=target_model,
+        local_dir=str(target_path),
+        local_dir_use_symlinks=False,
+    )
+    logger.info(f"Model downloaded successfully: {target_path}")
+    return str(target_path)
+
+
+def generate_image(prompt: str) -> str:
+    backend = get_settings().image_backend.strip().lower()
+    if backend == "openai":
+        return _generate_image_openai(prompt)
+    if backend in {"local", "local_sd", "sd15"}:
+        return _generate_image_local(prompt)
+    raise RuntimeError(f"Unsupported IMAGE_BACKEND: {backend}")

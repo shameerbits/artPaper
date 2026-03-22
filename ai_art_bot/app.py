@@ -5,6 +5,7 @@ import uvicorn
 from fastapi import FastAPI, HTTPException
 
 from database.db import list_images
+from generator.image_generator import download_local_model
 from scheduler.scheduler import PipelineRunner
 from uploader.deviantart_upload import bootstrap_tokens
 from utils.config import get_settings
@@ -35,7 +36,7 @@ def main() -> None:
     parser = argparse.ArgumentParser(description="Automated AI art generation pipeline")
     parser.add_argument(
         "command",
-        choices=["run_once", "run_loop", "generate_only", "serve", "auth_deviantart"],
+        choices=["run_once", "run_loop", "generate_only", "serve", "auth_deviantart", "download_model"],
         help="Pipeline command to execute",
     )
     parser.add_argument(
@@ -55,6 +56,16 @@ def main() -> None:
         default=8000,
         help="Dashboard port for the serve command",
     )
+    parser.add_argument(
+        "--model-id",
+        default=os.getenv("LOCAL_MODEL_ID", "runwayml/stable-diffusion-v1-5"),
+        help="Model id for local SD download (used with download_model)",
+    )
+    parser.add_argument(
+        "--local-dir",
+        default=os.getenv("LOCAL_MODELS_DIR", ""),
+        help="Destination directory for downloaded local model",
+    )
     args = parser.parse_args()
 
     if args.command == "serve":
@@ -65,6 +76,11 @@ def main() -> None:
         payload = bootstrap_tokens()
         has_refresh = bool(payload.get("refresh_token"))
         logger.info(f"DeviantArt authorization complete. refresh_token_saved={has_refresh}")
+        return
+
+    if args.command == "download_model":
+        model_path = download_local_model(model_id=args.model_id, local_dir=args.local_dir or None)
+        logger.info(f"Local model ready at: {model_path}")
         return
 
     get_settings().validate(args.command)

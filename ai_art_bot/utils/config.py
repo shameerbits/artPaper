@@ -15,7 +15,10 @@ DEVIANTART_TOKENS_PATH = DATA_DIR / "deviantart_tokens.json"
 
 @dataclass(frozen=True)
 class Settings:
+    image_backend: str
     openai_api_key: str
+    local_model_id: str
+    local_model_path: str
     replicate_api_token: str
     deviantart_client_id: str
     deviantart_client_secret: str
@@ -27,8 +30,12 @@ class Settings:
         missing: list[str] = []
         upscaler_backend = os.getenv("UPSCALER_BACKEND", "realesrgan").strip().lower()
         has_cached_deviantart_token = has_local_deviantart_tokens()
-        if command in {"run_once", "run_loop", "generate_only"} and not self.openai_api_key:
+        image_backend = (self.image_backend or "openai").strip().lower()
+        if command in {"run_once", "run_loop", "generate_only"} and image_backend == "openai" and not self.openai_api_key:
             missing.append("OPENAI_API_KEY")
+        if command in {"run_once", "run_loop", "generate_only"} and image_backend in {"local", "local_sd", "sd15"}:
+            if not (self.local_model_path or self.local_model_id):
+                missing.append("LOCAL_MODEL_PATH or LOCAL_MODEL_ID")
         if command in {"run_once", "run_loop"} and upscaler_backend == "replicate" and not self.replicate_api_token:
             missing.append("REPLICATE_API_TOKEN")
         if command in {"run_once", "run_loop"} and not (
@@ -63,7 +70,10 @@ def has_local_deviantart_tokens() -> bool:
 def get_settings() -> Settings:
     ensure_directories()
     return Settings(
+        image_backend=os.getenv("IMAGE_BACKEND", "openai"),
         openai_api_key=os.getenv("OPENAI_API_KEY", ""),
+        local_model_id=os.getenv("LOCAL_MODEL_ID", "runwayml/stable-diffusion-v1-5"),
+        local_model_path=os.getenv("LOCAL_MODEL_PATH", ""),
         replicate_api_token=os.getenv("REPLICATE_API_TOKEN", ""),
         deviantart_client_id=os.getenv("DEVIANTART_CLIENT_ID", ""),
         deviantart_client_secret=os.getenv("DEVIANTART_CLIENT_SECRET", ""),
