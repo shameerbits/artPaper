@@ -80,17 +80,30 @@ def _load_local_pipeline(model_source: str, use_openvino: bool) -> Any:
         return _LOCAL_PIPELINE
 
     if use_openvino:
+        openvino_pipeline_cls = None
         try:
             from optimum.intel.openvino import OVDiffusionPipeline
-        except Exception as exc:
+
+            openvino_pipeline_cls = OVDiffusionPipeline
+        except Exception:
+            try:
+                from optimum.intel.openvino import OVStableDiffusionPipeline
+
+                openvino_pipeline_cls = OVStableDiffusionPipeline
+            except Exception as exc:
+                raise RuntimeError(
+                    "OpenVINO local generation requires optimum-intel with OpenVINO diffusion pipelines. "
+                    "Install compatible `optimum-intel[openvino]` and OpenVINO runtime packages."
+                ) from exc
+
+        if openvino_pipeline_cls is None:
             raise RuntimeError(
-                "OpenVINO local generation requires `optimum-intel[openvino]` and OpenVINO runtime. "
-                "Install optional local generation dependencies first."
-            ) from exc
+                "Failed to resolve an OpenVINO diffusion pipeline class from optimum-intel."
+            )
 
         source_path = Path(model_source)
         export_model = not source_path.exists()
-        pipeline = OVDiffusionPipeline.from_pretrained(model_source, export=export_model)
+        pipeline = openvino_pipeline_cls.from_pretrained(model_source, export=export_model)
         pipeline.to(OPENVINO_DEVICE)
     else:
         try:
