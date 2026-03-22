@@ -163,6 +163,13 @@ def _load_local_pipeline(model_source: str, use_openvino: bool) -> Any:
             ov_kwargs.pop("model_save_dir", None)
             pipeline = openvino_pipeline_cls.from_pretrained(load_source, **ov_kwargs)
 
+        if export_model and not _is_openvino_export_dir(cached_export_dir):
+            try:
+                pipeline.save_pretrained(str(cached_export_dir))
+                logger.info(f"Persisted OpenVINO export cache to {cached_export_dir}")
+            except Exception as exc:
+                logger.warning(f"Failed to persist OpenVINO export cache at {cached_export_dir}: {exc}")
+
         pipeline.to(OPENVINO_DEVICE)
     else:
         try:
