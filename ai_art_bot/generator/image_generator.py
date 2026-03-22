@@ -22,10 +22,23 @@ LOCAL_GUIDANCE_SCALE = float(os.getenv("LOCAL_GUIDANCE_SCALE", "7.0"))
 LOCAL_SEED = int(os.getenv("LOCAL_SEED", "-1"))
 LOCAL_MODEL_USE_OPENVINO = os.getenv("LOCAL_MODEL_USE_OPENVINO", "false").strip().lower() in {"1", "true", "yes"}
 OPENVINO_DEVICE = os.getenv("OPENVINO_DEVICE", "GPU")
+OPENVINO_EXPORT_CACHE_DIR = Path(
+    os.getenv("OPENVINO_EXPORT_CACHE_DIR", str(Path(GENERATED_DIR).parent / "models" / "openvino_cache"))
+)
 
 _LOCAL_PIPELINE: Any | None = None
 _LOCAL_PIPELINE_SOURCE: str | None = None
 _LOCAL_PIPELINE_USE_OPENVINO: bool | None = None
+
+
+def _safe_model_slug(model_source: str) -> str:
+    return "".join(ch if ch.isalnum() or ch in "-_." else "_" for ch in model_source)
+
+
+def _is_openvino_export_dir(path: Path) -> bool:
+    if not path.exists() or not path.is_dir():
+        return False
+    return any(path.rglob("openvino_model.xml"))
 
 
 def _to_mobile_wallpaper(image_bytes: bytes, width: int = WALLPAPER_WIDTH, height: int = WALLPAPER_HEIGHT) -> bytes:
@@ -102,8 +115,29 @@ def _load_local_pipeline(model_source: str, use_openvino: bool) -> Any:
             )
 
         source_path = Path(model_source)
-        export_model = not source_path.exists()
-        pipeline = openvino_pipeline_cls.from_pretrained(model_source, export=export_model)
+        cached_export_dir = OPENVINO_EXPORT_CACHE_DIR / _safe_model_slug(model_source)
+        load_source = model_source
+        export_model = True
+
+        if source_path.exists():
+            load_source = str(source_path)
+            export_model = not _is_openvino_export_dir(source_path)
+        elif _is_openvino_export_dir(cached_export_dir):
+            load_source = str(cached_export_dir)
+            export_model = False
+
+        ov_kwargs: dict[str, Any] = {"export": export_model, "compile": False}
+        if export_model:
+            cached_export_dir.mkdir(parents=True, exist_ok=True)
+            ov_kwargs["model_save_dir"] = str(cached_export_dir)
+
+        try:
+            pipeline = openvino_pipeline_cls.from_pretrained(load_source, **ov_kwargs)
+        except TypeError:
+            # Backward compatibility for older optimum-intel versions.
+            ov_kwargs.pop("model_save_dir", None)
+            pipeline = openvino_pipeline_cls.from_pretrained(load_source, **ov_kwargs)
+
         pipeline.to(OPENVINO_DEVICE)
     else:
         try:
