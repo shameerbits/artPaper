@@ -22,6 +22,7 @@ LOCAL_GUIDANCE_SCALE = float(os.getenv("LOCAL_GUIDANCE_SCALE", "7.0"))
 LOCAL_SEED = int(os.getenv("LOCAL_SEED", "-1"))
 LOCAL_MODEL_USE_OPENVINO = os.getenv("LOCAL_MODEL_USE_OPENVINO", "false").strip().lower() in {"1", "true", "yes"}
 OPENVINO_DEVICE = os.getenv("OPENVINO_DEVICE", "GPU")
+OPENVINO_OOM_AUTO_RETRY = os.getenv("OPENVINO_OOM_AUTO_RETRY", "true").strip().lower() in {"1", "true", "yes"}
 OPENVINO_EXPORT_CACHE_DIR = Path(
     os.getenv("OPENVINO_EXPORT_CACHE_DIR", str(Path(GENERATED_DIR).parent / "models" / "openvino_cache"))
 )
@@ -39,6 +40,30 @@ def _is_openvino_export_dir(path: Path) -> bool:
     if not path.exists() or not path.is_dir():
         return False
     return any(path.rglob("openvino_model.xml"))
+
+
+def _is_openvino_memory_error(exc: Exception) -> bool:
+    message = str(exc).lower()
+    markers = (
+        "exceeded max size of memory object allocation",
+        "exceed_allocatable_mem_size",
+        "not enough memory",
+        "out of memory",
+    )
+    return any(marker in message for marker in markers)
+
+
+def _align_to_64(value: int) -> int:
+    return max(64, (value // 64) * 64)
+
+
+def _openvino_size_candidates(width: int, height: int) -> list[tuple[int, int]]:
+    candidates: list[tuple[int, int]] = [(width, height)]
+    for scale in (0.85, 0.75, 0.67, 0.5):
+        resized = (_align_to_64(int(width * scale)), _align_to_64(int(height * scale)))
+        if resized not in candidates:
+            candidates.append(resized)
+    return candidates
 
 
 def _to_mobile_wallpaper(image_bytes: bytes, width: int = WALLPAPER_WIDTH, height: int = WALLPAPER_HEIGHT) -> bytes:
@@ -204,7 +229,31 @@ def _generate_image_local(prompt: str) -> str:
         except Exception:
             logger.warning("Failed to set LOCAL_SEED generator; continuing without deterministic seed")
 
-    result = pipeline(**generation_kwargs)
+    if LOCAL_MODEL_USE_OPENVINO and OPENVINO_OOM_AUTO_RETRY:
+        size_candidates = _openvino_size_candidates(LOCAL_IMAGE_WIDTH, LOCAL_IMAGE_HEIGHT)
+        last_error: Exception | None = None
+        result = None
+        for width, height in size_candidates:
+            try:
+                if width != LOCAL_IMAGE_WIDTH or height != LOCAL_IMAGE_HEIGHT:
+                    logger.warning(
+                        f"Retrying OpenVINO generation with reduced size to avoid GPU OOM: {width}x{height}"
+                    )
+                generation_kwargs["width"] = width
+                generation_kwargs["height"] = height
+                result = pipeline(**generation_kwargs)
+                break
+            except Exception as exc:
+                last_error = exc
+                if _is_openvino_memory_error(exc) and (width, height) != size_candidates[-1]:
+                    continue
+                raise
+
+        if result is None:
+            raise RuntimeError(f"OpenVINO generation failed after OOM retries. Last error: {last_error}")
+    else:
+        result = pipeline(**generation_kwargs)
+
     image = result.images[0]
     return _save_image_as_wallpaper(image)
 
