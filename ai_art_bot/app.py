@@ -223,10 +223,12 @@ def _render_settings_editor(saved_settings: dict[str, str]) -> dict[str, str]:
 
     # Upscaler Backend Selection
     st.markdown("##### Upscaler Backend")
+    upscaler_default = saved_settings.get("UPSCALER_BACKEND", os.getenv("UPSCALER_BACKEND", "realesrgan")).lower()
+    upscaler_options = ["realesrgan", "replicate", "directml", "openvino"]
     upscaler_backend = st.selectbox(
         "UPSCALER_BACKEND",
-        options=["realesrgan", "replicate", "directml", "openvino"],
-        index=0,
+        options=upscaler_options,
+        index=upscaler_options.index(upscaler_default) if upscaler_default in upscaler_options else 0,
         key="cfg_UPSCALER_BACKEND",
     )
     settings_payload["UPSCALER_BACKEND"] = upscaler_backend
@@ -267,7 +269,79 @@ def _render_settings_editor(saved_settings: dict[str, str]) -> dict[str, str]:
                 value=int(saved_settings.get("REALESRGAN_PRE_PAD", os.getenv("REALESRGAN_PRE_PAD", "0"))),
                 key="cfg_REALESRGAN_PRE_PAD",
             )
-    elif upscaler_backend in {"directml", "openvino"}:
+    elif upscaler_backend == "directml":
+        col1, col2 = st.columns(2)
+        with col1:
+            settings_payload["ACCEL_ONNX_MODEL_PATH"] = st.text_input(
+                "ACCEL_ONNX_MODEL_PATH",
+                value=saved_settings.get("ACCEL_ONNX_MODEL_PATH", os.getenv("ACCEL_ONNX_MODEL_PATH", "")),
+                key="cfg_ACCEL_ONNX_MODEL_PATH",
+            )
+            settings_payload["DIRECTML_DEVICE_ID"] = str(
+                st.number_input(
+                    "DIRECTML_DEVICE_ID",
+                    min_value=0,
+                    value=int(saved_settings.get("DIRECTML_DEVICE_ID", os.getenv("DIRECTML_DEVICE_ID", "0"))),
+                    step=1,
+                    key="cfg_DIRECTML_DEVICE_ID",
+                )
+            )
+            settings_payload["ACCEL_TILE"] = str(
+                st.number_input(
+                    "ACCEL_TILE",
+                    min_value=0,
+                    value=int(saved_settings.get("ACCEL_TILE", os.getenv("ACCEL_TILE", "0"))),
+                    step=1,
+                    key="cfg_ACCEL_TILE",
+                )
+            )
+        with col2:
+            settings_payload["ACCEL_ONNX_MODEL_URL"] = st.text_input(
+                "ACCEL_ONNX_MODEL_URL",
+                value=saved_settings.get("ACCEL_ONNX_MODEL_URL", os.getenv("ACCEL_ONNX_MODEL_URL", "")),
+                key="cfg_ACCEL_ONNX_MODEL_URL",
+            )
+            settings_payload["ACCEL_TILE_PAD"] = str(
+                st.number_input(
+                    "ACCEL_TILE_PAD",
+                    min_value=0,
+                    value=int(saved_settings.get("ACCEL_TILE_PAD", os.getenv("ACCEL_TILE_PAD", "8"))),
+                    step=1,
+                    key="cfg_ACCEL_TILE_PAD",
+                )
+            )
+    elif upscaler_backend == "openvino":
+        col1, col2 = st.columns(2)
+        with col1:
+            settings_payload["ACCEL_ONNX_MODEL_PATH"] = st.text_input(
+                "ACCEL_ONNX_MODEL_PATH",
+                value=saved_settings.get("ACCEL_ONNX_MODEL_PATH", os.getenv("ACCEL_ONNX_MODEL_PATH", "")),
+                key="cfg_ACCEL_ONNX_MODEL_PATH",
+            )
+            settings_payload["ACCEL_TILE"] = str(
+                st.number_input(
+                    "ACCEL_TILE",
+                    min_value=0,
+                    value=int(saved_settings.get("ACCEL_TILE", os.getenv("ACCEL_TILE", "0"))),
+                    step=1,
+                    key="cfg_ACCEL_TILE",
+                )
+            )
+        with col2:
+            settings_payload["ACCEL_ONNX_MODEL_URL"] = st.text_input(
+                "ACCEL_ONNX_MODEL_URL",
+                value=saved_settings.get("ACCEL_ONNX_MODEL_URL", os.getenv("ACCEL_ONNX_MODEL_URL", "")),
+                key="cfg_ACCEL_ONNX_MODEL_URL",
+            )
+            settings_payload["ACCEL_TILE_PAD"] = str(
+                st.number_input(
+                    "ACCEL_TILE_PAD",
+                    min_value=0,
+                    value=int(saved_settings.get("ACCEL_TILE_PAD", os.getenv("ACCEL_TILE_PAD", "8"))),
+                    step=1,
+                    key="cfg_ACCEL_TILE_PAD",
+                )
+            )
         settings_payload["OPENVINO_DEVICE"] = st.text_input(
             "OPENVINO_DEVICE",
             value=saved_settings.get("OPENVINO_DEVICE", os.getenv("OPENVINO_DEVICE", "GPU_FP32")),
