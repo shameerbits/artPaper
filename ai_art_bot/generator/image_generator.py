@@ -20,6 +20,9 @@ LOCAL_IMAGE_HEIGHT = int(os.getenv("LOCAL_IMAGE_HEIGHT", str(WALLPAPER_HEIGHT)))
 LOCAL_NUM_INFERENCE_STEPS = int(os.getenv("LOCAL_NUM_INFERENCE_STEPS", "24"))
 LOCAL_GUIDANCE_SCALE = float(os.getenv("LOCAL_GUIDANCE_SCALE", "7.0"))
 LOCAL_SEED = int(os.getenv("LOCAL_SEED", "-1"))
+LOCAL_DIRECTML_FALLBACK_TO_CPU = (
+    os.getenv("LOCAL_DIRECTML_FALLBACK_TO_CPU", "true").strip().lower() in {"1", "true", "yes"}
+)
 LOCAL_MODEL_USE_DIRECTML = (
     os.getenv("LOCAL_MODEL_USE_DIRECTML", os.getenv("LOCAL_MODEL_USE_OPENVINO", "false"))
     .strip()
@@ -236,8 +239,19 @@ def _generate_image_local(prompt: str) -> str:
                 result = pipeline(**generation_kwargs)
             finally:
                 torch.set_default_dtype(default_dtype)
-        except Exception:
-            result = pipeline(**generation_kwargs)
+        except Exception as exc:
+            error_text = str(exc)
+            if (
+                LOCAL_DIRECTML_FALLBACK_TO_CPU
+                and "does not support Double (Float64) operations" in error_text
+            ):
+                logger.warning(
+                    "DirectML failed due to Float64 limitation. Falling back to CPU generation for this run."
+                )
+                cpu_pipeline = _load_local_pipeline(model_source=model_source, use_directml=False)
+                result = cpu_pipeline(**generation_kwargs)
+            else:
+                raise
     else:
         result = pipeline(**generation_kwargs)
 
