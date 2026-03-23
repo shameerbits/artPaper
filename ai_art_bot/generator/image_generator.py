@@ -9,7 +9,7 @@ from typing import Any
 from openai import OpenAI
 from PIL import Image
 
-from utils.config import GENERATED_DIR, get_settings
+from utils.config import GENERATED_DIR, MODELS_DIR, get_settings
 from utils.logger import logger
 
 
@@ -26,7 +26,7 @@ OPENVINO_DEVICE = os.getenv("OPENVINO_DEVICE", "GPU")
 OPENVINO_OOM_AUTO_RETRY = os.getenv("OPENVINO_OOM_AUTO_RETRY", "true").strip().lower() in {"1", "true", "yes"}
 OPENVINO_GPU_FALLBACK_TO_CPU = os.getenv("OPENVINO_GPU_FALLBACK_TO_CPU", "true").strip().lower() in {"1", "true", "yes"}
 OPENVINO_EXPORT_CACHE_DIR = Path(
-    os.getenv("OPENVINO_EXPORT_CACHE_DIR", str(Path(GENERATED_DIR).parent / "models" / "openvino_cache"))
+    os.getenv("OPENVINO_EXPORT_CACHE_DIR", str(MODELS_DIR / "openvino_cache"))
 )
 
 _LOCAL_PIPELINE: Any | None = None
@@ -148,7 +148,15 @@ def _save_image_as_wallpaper(image: Image.Image) -> str:
 
 def _resolve_model_source() -> str:
     settings = get_settings()
-    return settings.local_model_path.strip() or settings.local_model_id.strip()
+    local_model_path = settings.local_model_path.strip()
+    if local_model_path:
+        path = Path(local_model_path).expanduser()
+        if path.exists():
+            return str(path)
+        logger.warning(
+            f"LOCAL_MODEL_PATH does not exist: {local_model_path}. Falling back to LOCAL_MODEL_ID."
+        )
+    return settings.local_model_id.strip()
 
 
 def _load_local_pipeline(model_source: str, use_openvino: bool) -> Any:
@@ -340,7 +348,7 @@ def download_local_model(model_id: str | None = None, local_dir: str | None = No
     if not target_model:
         raise RuntimeError("No model id provided. Pass --model-id or set LOCAL_MODEL_ID.")
 
-    destination = Path(local_dir).expanduser().resolve() if local_dir else (Path(__file__).resolve().parents[1] / "models")
+    destination = Path(local_dir).expanduser().resolve() if local_dir else MODELS_DIR
     destination.mkdir(parents=True, exist_ok=True)
     model_slug = target_model.split("/")[-1]
     target_path = destination / model_slug

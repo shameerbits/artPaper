@@ -49,7 +49,7 @@ pip install -r requirements.txt
 export OPENAI_API_KEY="..."
 export IMAGE_BACKEND="openai"
 export LOCAL_MODEL_ID="runwayml/stable-diffusion-v1-5"
-export LOCAL_MODEL_PATH=""
+export LOCAL_MODEL_PATH="./models/stable-diffusion-v1-5"
 export LOCAL_MODEL_USE_OPENVINO="false"
 export LOCAL_IMAGE_WIDTH="768"
 export LOCAL_IMAGE_HEIGHT="1344"
@@ -70,9 +70,9 @@ export REALESRGAN_TILE_PAD="10"
 export REALESRGAN_PRE_PAD="0"
 export REALESRGAN_MAX_INPUT_SIDE="0"
 export REALESRGAN_MAX_INPUT_PIXELS="0"
-export ACCEL_ONNX_MODEL_PATH=""
+export ACCEL_ONNX_MODEL_PATH="./weights/realesrgan_x4.onnx"
 export ACCEL_ONNX_MODEL_URL=""
-export ACCEL_DEFAULT_MODEL_PATH=""
+export ACCEL_DEFAULT_MODEL_PATH="./weights/realesrgan_x4.onnx"
 export ACCEL_TILE="0"
 export ACCEL_TILE_PAD="8"
 export OPENVINO_DEVICE="GPU_FP32"
@@ -88,14 +88,14 @@ Notes:
 - DeviantArt uploads usually require a user-approved OAuth refresh token. Client ID and secret alone are not enough to publish on behalf of an account.
 - `DEVIANTART_ACCESS_TOKEN` is optional if you already have a fresh token and want to skip the refresh call.
 - You can bootstrap and cache DeviantArt tokens locally with `python app.py auth_deviantart` after setting only `DEVIANTART_CLIENT_ID` and `DEVIANTART_CLIENT_SECRET`.
-- Cached DeviantArt tokens are stored at `ai_art_bot/data/deviantart_tokens.json` and are auto-updated when DeviantArt rotates `refresh_token`.
+- Cached DeviantArt tokens are stored at `./data/deviantart_tokens.json` and are auto-updated when DeviantArt rotates `refresh_token`.
 - `DEVIANTART_PUBLISH=false` enables upload test mode (stash submit only, publish skipped).
 - `UPSCALER_BACKEND` supports `realesrgan` (default, local no-token upscaling), `realesrgan_local`, `replicate`, `directml`, and `openvino`.
 - `REALESRGAN_TILE` defaults to `256` and dramatically lowers peak RAM usage on CPU compared to full-frame (`0`) inference.
 - `REALESRGAN_MAX_INPUT_SIDE` and `REALESRGAN_MAX_INPUT_PIXELS` are optional safety limits to pre-downscale very large inputs before upscaling.
 - `REPLICATE_API_TOKEN` is only required when `UPSCALER_BACKEND=replicate`.
 - `ACCEL_ONNX_MODEL_PATH` (or `ACCEL_ONNX_MODEL_URL`) is required when `UPSCALER_BACKEND` is `directml` or `openvino`.
-- If `ACCEL_ONNX_MODEL_PATH` is empty, the app auto-uses `ai_art_bot/weights/realesrgan_x4.onnx` when that file exists.
+- If `ACCEL_ONNX_MODEL_PATH` is empty, the app auto-uses `./weights/realesrgan_x4.onnx` when that file exists.
 - `ACCEL_DEFAULT_MODEL_PATH` can override this default local model location.
 - `ACCEL_TILE` can be enabled for accelerated backends to process very large images in chunks.
 - Prompt collection uses CivitAI-style API data first, then a local prompt generator, then `prompts.txt` fallback.
@@ -160,7 +160,7 @@ If you have a local model folder already, skip download and set `LOCAL_MODEL_PAT
 
 ```bash
 export IMAGE_BACKEND="local_sd"
-export LOCAL_MODEL_PATH="/absolute/path/to/your/model/folder"
+export LOCAL_MODEL_PATH="./models/stable-diffusion-v1-5"
 ```
 
 or use a model id directly:
@@ -208,7 +208,7 @@ streamlit run app.py
 
 ## Streamlit queue app
 
-- Configuration can be saved from the UI and is written to `ai_art_bot/data/web_settings.json`.
+- Configuration can be saved from the UI and is written to `./data/web_settings.json`.
 - All non-secret runtime options are configurable in the UI.
 - API keys and secrets are not editable in the UI; they must be set via environment variables or Streamlit secrets.
 - The UI shows secret availability and validates required credentials for the selected task mode before allowing queue submission.

@@ -8,6 +8,10 @@ BASE_DIR = Path(__file__).resolve().parents[1]
 DATA_DIR = BASE_DIR / "data"
 GENERATED_DIR = DATA_DIR / "generated"
 UPSCALED_DIR = DATA_DIR / "upscaled"
+MODELS_DIR = BASE_DIR / "models"
+WEIGHTS_DIR = BASE_DIR / "weights"
+LOCAL_DEFAULT_MODEL_PATH = MODELS_DIR / "stable-diffusion-v1-5"
+ACCEL_DEFAULT_ONNX_MODEL_PATH = WEIGHTS_DIR / "realesrgan_x4.onnx"
 PROMPTS_FILE = BASE_DIR / "prompts.txt"
 DB_PATH = DATA_DIR / "images.db"
 DEVIANTART_TOKENS_PATH = DATA_DIR / "deviantart_tokens.json"
@@ -95,7 +99,7 @@ class Settings:
 
 
 def ensure_directories() -> None:
-    for directory in (DATA_DIR, GENERATED_DIR, UPSCALED_DIR):
+    for directory in (DATA_DIR, GENERATED_DIR, UPSCALED_DIR, MODELS_DIR, WEIGHTS_DIR):
         directory.mkdir(parents=True, exist_ok=True)
 
 
@@ -139,7 +143,7 @@ def get_settings() -> Settings:
         image_backend=os.getenv("IMAGE_BACKEND", "openai"),
         openai_api_key=os.getenv("OPENAI_API_KEY", ""),
         local_model_id=os.getenv("LOCAL_MODEL_ID", "runwayml/stable-diffusion-v1-5"),
-        local_model_path=os.getenv("LOCAL_MODEL_PATH", ""),
+        local_model_path=os.getenv("LOCAL_MODEL_PATH", str(LOCAL_DEFAULT_MODEL_PATH)),
         replicate_api_token=os.getenv("REPLICATE_API_TOKEN", ""),
         deviantart_client_id=os.getenv("DEVIANTART_CLIENT_ID", ""),
         deviantart_client_secret=os.getenv("DEVIANTART_CLIENT_SECRET", ""),

@@ -7,14 +7,14 @@ import replicate
 import requests
 
 from upscaler.accelerated_upscaler import upscale_with_directml, upscale_with_openvino
-from utils.config import UPSCALED_DIR, get_settings
+from utils.config import UPSCALED_DIR, WEIGHTS_DIR, get_settings
 from utils.logger import logger
 
 
 UPSCALER_BACKEND = os.getenv("UPSCALER_BACKEND", "realesrgan").strip().lower()
 REALESRGAN_MODEL_NAME = os.getenv("REALESRGAN_MODEL_NAME", "RealESRGAN_x4plus")
 REALESRGAN_OUTSCALE = int(os.getenv("REALESRGAN_OUTSCALE", "4"))
-REALESRGAN_WEIGHTS_DIR = Path(os.getenv("REALESRGAN_WEIGHTS_DIR", str(Path(UPSCALED_DIR).parent / "weights")))
+REALESRGAN_WEIGHTS_DIR = Path(os.getenv("REALESRGAN_WEIGHTS_DIR", str(WEIGHTS_DIR)))
 REALESRGAN_TILE = max(int(os.getenv("REALESRGAN_TILE", "256")), 0)
 REALESRGAN_TILE_PAD = max(int(os.getenv("REALESRGAN_TILE_PAD", "10")), 0)
 REALESRGAN_PRE_PAD = max(int(os.getenv("REALESRGAN_PRE_PAD", "0")), 0)

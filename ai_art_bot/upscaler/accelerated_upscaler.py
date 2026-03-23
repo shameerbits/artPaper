@@ -6,16 +6,16 @@ import cv2
 import numpy as np
 import requests
 
-from utils.config import UPSCALED_DIR
+from utils.config import ACCEL_DEFAULT_ONNX_MODEL_PATH, MODELS_DIR, UPSCALED_DIR
 from utils.logger import logger
 
 
-ACCEL_ONNX_MODEL_PATH = os.getenv("ACCEL_ONNX_MODEL_PATH", "").strip()
+ACCEL_ONNX_MODEL_PATH = os.getenv("ACCEL_ONNX_MODEL_PATH", str(ACCEL_DEFAULT_ONNX_MODEL_PATH)).strip()
 ACCEL_ONNX_MODEL_URL = os.getenv("ACCEL_ONNX_MODEL_URL", "").strip()
 ACCEL_MODEL_CACHE_DIR = Path(
-    os.getenv("ACCEL_MODEL_CACHE_DIR", str(Path(UPSCALED_DIR).parent / "models"))
+    os.getenv("ACCEL_MODEL_CACHE_DIR", str(MODELS_DIR))
 )
-ACCEL_DEFAULT_MODEL_PATH = Path(os.getenv("ACCEL_DEFAULT_MODEL_PATH", str(Path(UPSCALED_DIR).parent / "weights" / "realesrgan_x4.onnx")))
+ACCEL_DEFAULT_MODEL_PATH = Path(os.getenv("ACCEL_DEFAULT_MODEL_PATH", str(ACCEL_DEFAULT_ONNX_MODEL_PATH)))
 ACCEL_TILE = max(int(os.getenv("ACCEL_TILE", "0")), 0)
 ACCEL_TILE_PAD = max(int(os.getenv("ACCEL_TILE_PAD", "8")), 0)
 OPENVINO_DEVICE = os.getenv("OPENVINO_DEVICE", "GPU_FP32").strip() or "GPU_FP32"
@@ -30,9 +30,9 @@ def _build_output_path(prefix: str) -> Path:
 def _resolve_model_path() -> Path:
     if ACCEL_ONNX_MODEL_PATH:
         model_path = Path(ACCEL_ONNX_MODEL_PATH)
-        if not model_path.exists():
-            raise RuntimeError(f"ACCEL_ONNX_MODEL_PATH does not exist: {model_path}")
-        return model_path
+        if model_path.exists():
+            return model_path
+        logger.warning(f"ACCEL_ONNX_MODEL_PATH does not exist: {model_path}. Trying fallback options.")
 
     if ACCEL_DEFAULT_MODEL_PATH.exists():
         logger.info(f"Using default ONNX model path: {ACCEL_DEFAULT_MODEL_PATH}")
