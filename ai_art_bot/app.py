@@ -214,17 +214,25 @@ def _render_settings_editor(saved_settings: dict[str, str]) -> dict[str, str]:
                 value=saved_settings.get("LOCAL_SEED", os.getenv("LOCAL_SEED", "-1")),
                 key="cfg_LOCAL_SEED",
             )
-            settings_payload["LOCAL_MODEL_USE_OPENVINO"] = st.selectbox(
-                "LOCAL_MODEL_USE_OPENVINO",
+            settings_payload["LOCAL_MODEL_USE_DIRECTML"] = st.selectbox(
+                "LOCAL_MODEL_USE_DIRECTML",
                 options=["false", "true"],
-                index=1 if saved_settings.get("LOCAL_MODEL_USE_OPENVINO", "false").lower() == "true" else 0,
-                key="cfg_LOCAL_MODEL_USE_OPENVINO",
+                index=1
+                if saved_settings.get(
+                    "LOCAL_MODEL_USE_DIRECTML",
+                    saved_settings.get("LOCAL_MODEL_USE_OPENVINO", "false"),
+                ).lower()
+                == "true"
+                else 0,
+                key="cfg_LOCAL_MODEL_USE_DIRECTML",
             )
 
     # Upscaler Backend Selection
     st.markdown("##### Upscaler Backend")
     upscaler_default = saved_settings.get("UPSCALER_BACKEND", os.getenv("UPSCALER_BACKEND", "realesrgan")).lower()
-    upscaler_options = ["realesrgan", "replicate", "directml", "openvino"]
+    if upscaler_default == "openvino":
+        upscaler_default = "directml"
+    upscaler_options = ["realesrgan", "replicate", "directml"]
     upscaler_backend = st.selectbox(
         "UPSCALER_BACKEND",
         options=upscaler_options,
@@ -313,47 +321,6 @@ def _render_settings_editor(saved_settings: dict[str, str]) -> dict[str, str]:
                     key="cfg_ACCEL_TILE_PAD",
                 )
             )
-    elif upscaler_backend == "openvino":
-        col1, col2 = st.columns(2)
-        with col1:
-            settings_payload["ACCEL_ONNX_MODEL_PATH"] = st.text_input(
-                "ACCEL_ONNX_MODEL_PATH",
-                value=saved_settings.get(
-                    "ACCEL_ONNX_MODEL_PATH",
-                    os.getenv("ACCEL_ONNX_MODEL_PATH", "./weights/realesrgan_x4.onnx"),
-                ),
-                key="cfg_ACCEL_ONNX_MODEL_PATH",
-            )
-            settings_payload["ACCEL_TILE"] = str(
-                st.number_input(
-                    "ACCEL_TILE",
-                    min_value=0,
-                    value=int(saved_settings.get("ACCEL_TILE", os.getenv("ACCEL_TILE", "0"))),
-                    step=1,
-                    key="cfg_ACCEL_TILE",
-                )
-            )
-        with col2:
-            settings_payload["ACCEL_ONNX_MODEL_URL"] = st.text_input(
-                "ACCEL_ONNX_MODEL_URL",
-                value=saved_settings.get("ACCEL_ONNX_MODEL_URL", os.getenv("ACCEL_ONNX_MODEL_URL", "")),
-                key="cfg_ACCEL_ONNX_MODEL_URL",
-            )
-            settings_payload["ACCEL_TILE_PAD"] = str(
-                st.number_input(
-                    "ACCEL_TILE_PAD",
-                    min_value=0,
-                    value=int(saved_settings.get("ACCEL_TILE_PAD", os.getenv("ACCEL_TILE_PAD", "8"))),
-                    step=1,
-                    key="cfg_ACCEL_TILE_PAD",
-                )
-            )
-        settings_payload["OPENVINO_DEVICE"] = st.text_input(
-            "OPENVINO_DEVICE",
-            value=saved_settings.get("OPENVINO_DEVICE", os.getenv("OPENVINO_DEVICE", "GPU_FP32")),
-            key="cfg_OPENVINO_DEVICE",
-        )
-
     # DeviantArt Settings
     st.markdown("##### DeviantArt Upload")
     col1, col2 = st.columns(2)

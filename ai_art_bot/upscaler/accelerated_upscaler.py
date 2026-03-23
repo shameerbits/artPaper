@@ -18,7 +18,6 @@ ACCEL_MODEL_CACHE_DIR = Path(
 ACCEL_DEFAULT_MODEL_PATH = Path(os.getenv("ACCEL_DEFAULT_MODEL_PATH", str(ACCEL_DEFAULT_ONNX_MODEL_PATH)))
 ACCEL_TILE = max(int(os.getenv("ACCEL_TILE", "0")), 0)
 ACCEL_TILE_PAD = max(int(os.getenv("ACCEL_TILE_PAD", "8")), 0)
-OPENVINO_DEVICE = os.getenv("OPENVINO_DEVICE", "GPU_FP32").strip() or "GPU_FP32"
 DIRECTML_DEVICE_ID = max(int(os.getenv("DIRECTML_DEVICE_ID", "0")), 0)
 
 
@@ -61,24 +60,25 @@ def _create_session(model_path: Path, provider: str):
     try:
         import onnxruntime as ort
     except Exception as exc:
-        if provider == "DmlExecutionProvider":
-            install_hint = "pip install onnxruntime-directml"
-        else:
-            install_hint = "pip install onnxruntime-openvino"
+        install_hint = "pip install onnxruntime-directml"
         raise RuntimeError(
             "onnxruntime is not installed for accelerated upscaling. Install with: "
             f"{install_hint}"
         ) from exc
 
     available = ort.get_available_providers()
+    if provider == "OpenVINOExecutionProvider":
+        logger.warning(
+            "OpenVINO provider requested, but this build is DirectML-first. Using DmlExecutionProvider instead."
+        )
+        provider = "DmlExecutionProvider"
+
     if provider not in available:
         raise RuntimeError(
             f"Requested provider '{provider}' is not available. Available providers: {available}."
         )
 
     provider_stack: list = [provider, "CPUExecutionProvider"]
-    if provider == "OpenVINOExecutionProvider":
-        provider_stack = [("OpenVINOExecutionProvider", {"device_type": OPENVINO_DEVICE}), "CPUExecutionProvider"]
     if provider == "DmlExecutionProvider":
         provider_stack = [("DmlExecutionProvider", {"device_id": DIRECTML_DEVICE_ID}), "CPUExecutionProvider"]
 
@@ -255,8 +255,9 @@ def upscale_with_directml(image_path: str) -> str:
 
 
 def upscale_with_openvino(image_path: str) -> str:
+    logger.warning("upscale_with_openvino is deprecated; using DirectML backend.")
     return _upscale_with_provider(
         image_path,
-        provider="OpenVINOExecutionProvider",
-        output_prefix="upscaled_openvino",
+        provider="DmlExecutionProvider",
+        output_prefix="upscaled_directml",
     )

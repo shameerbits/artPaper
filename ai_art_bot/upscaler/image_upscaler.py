@@ -6,7 +6,7 @@ from pathlib import Path
 import replicate
 import requests
 
-from upscaler.accelerated_upscaler import upscale_with_directml, upscale_with_openvino
+from upscaler.accelerated_upscaler import upscale_with_directml
 from utils.config import UPSCALED_DIR, WEIGHTS_DIR, get_settings
 from utils.logger import logger
 
@@ -212,8 +212,9 @@ def upscale_image(image_path: str) -> str:
     if UPSCALER_BACKEND == "directml":
         return upscale_with_directml(image_path)
     if UPSCALER_BACKEND == "openvino":
-        return upscale_with_openvino(image_path)
+        logger.warning("UPSCALER_BACKEND=openvino is deprecated; using directml backend")
+        return upscale_with_directml(image_path)
     raise RuntimeError(
         "Unsupported UPSCALER_BACKEND "
-        f"'{UPSCALER_BACKEND}'. Use 'realesrgan', 'realesrgan_local', 'replicate', 'directml', or 'openvino'."
+        f"'{UPSCALER_BACKEND}'. Use 'realesrgan', 'realesrgan_local', 'replicate', or 'directml'."
     )

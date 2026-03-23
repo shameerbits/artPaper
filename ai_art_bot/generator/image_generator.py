@@ -1,6 +1,5 @@
 import base64
 import os
-import tempfile
 from datetime import datetime, timezone
 from io import BytesIO
 from pathlib import Path
@@ -21,92 +20,17 @@ LOCAL_IMAGE_HEIGHT = int(os.getenv("LOCAL_IMAGE_HEIGHT", str(WALLPAPER_HEIGHT)))
 LOCAL_NUM_INFERENCE_STEPS = int(os.getenv("LOCAL_NUM_INFERENCE_STEPS", "24"))
 LOCAL_GUIDANCE_SCALE = float(os.getenv("LOCAL_GUIDANCE_SCALE", "7.0"))
 LOCAL_SEED = int(os.getenv("LOCAL_SEED", "-1"))
-LOCAL_MODEL_USE_OPENVINO = os.getenv("LOCAL_MODEL_USE_OPENVINO", "false").strip().lower() in {"1", "true", "yes"}
-OPENVINO_DEVICE = os.getenv("OPENVINO_DEVICE", "GPU")
-OPENVINO_OOM_AUTO_RETRY = os.getenv("OPENVINO_OOM_AUTO_RETRY", "true").strip().lower() in {"1", "true", "yes"}
-OPENVINO_GPU_FALLBACK_TO_CPU = os.getenv("OPENVINO_GPU_FALLBACK_TO_CPU", "true").strip().lower() in {"1", "true", "yes"}
-OPENVINO_EXPORT_CACHE_DIR = Path(
-    os.getenv("OPENVINO_EXPORT_CACHE_DIR", str(MODELS_DIR / "openvino_cache"))
+LOCAL_MODEL_USE_DIRECTML = (
+    os.getenv("LOCAL_MODEL_USE_DIRECTML", os.getenv("LOCAL_MODEL_USE_OPENVINO", "false"))
+    .strip()
+    .lower()
+    in {"1", "true", "yes"}
 )
+DIRECTML_DEVICE_ID = max(int(os.getenv("DIRECTML_DEVICE_ID", "0")), 0)
 
 _LOCAL_PIPELINE: Any | None = None
 _LOCAL_PIPELINE_SOURCE: str | None = None
-_LOCAL_PIPELINE_USE_OPENVINO: bool | None = None
-
-
-def _patch_windows_tempfile_cleanup_for_openvino() -> None:
-    if os.name != "nt":
-        return
-    if os.getenv("OPENVINO_WINDOWS_TEMPFILE_CLEANUP_PATCH", "true").strip().lower() not in {"1", "true", "yes"}:
-        return
-
-    temp_dir_cls = tempfile.TemporaryDirectory
-    if getattr(temp_dir_cls, "_artpaper_openvino_patch", False):
-        return
-
-    original_rmtree = temp_dir_cls._rmtree
-
-    @classmethod
-    def _patched_rmtree(cls, name: str, *args: Any, **kwargs: Any) -> None:
-        kwargs["ignore_errors"] = True
-        try:
-            original_rmtree(name, *args, **kwargs)
-        except (PermissionError, FileNotFoundError, NotADirectoryError):
-            # OpenVINO can keep temp model files locked briefly on Windows at shutdown.
-            return
-        except OSError as exc:
-            if getattr(exc, "winerror", None) in {3, 5, 32, 145, 267}:
-                return
-            raise
-
-    temp_dir_cls._rmtree = _patched_rmtree
-    temp_dir_cls._artpaper_openvino_patch = True
-    logger.info("Applied Windows tempfile cleanup patch for OpenVINO shutdown stability")
-
-
-def _safe_model_slug(model_source: str) -> str:
-    return "".join(ch if ch.isalnum() or ch in "-_." else "_" for ch in model_source)
-
-
-def _is_openvino_export_dir(path: Path) -> bool:
-    if not path.exists() or not path.is_dir():
-        return False
-    return any(path.rglob("openvino_model.xml"))
-
-
-def _is_openvino_memory_error(exc: Exception) -> bool:
-    message = str(exc).lower()
-    markers = (
-        "exceeded max size of memory object allocation",
-        "exceed_allocatable_mem_size",
-        "not enough memory",
-        "out of memory",
-    )
-    return any(marker in message for marker in markers)
-
-
-def _is_openvino_gpu_runtime_error(exc: Exception) -> bool:
-    message = str(exc).lower()
-    markers = (
-        "clflush, error code: -5",
-        "clwaitforevents, error code: -14",
-        "ocl_stream.cpp",
-        "intel_gpu",
-    )
-    return any(marker in message for marker in markers)
-
-
-def _align_to_64(value: int) -> int:
-    return max(64, (value // 64) * 64)
-
-
-def _openvino_size_candidates(width: int, height: int) -> list[tuple[int, int]]:
-    candidates: list[tuple[int, int]] = [(width, height)]
-    for scale in (0.85, 0.75, 0.67, 0.5):
-        resized = (_align_to_64(int(width * scale)), _align_to_64(int(height * scale)))
-        if resized not in candidates:
-            candidates.append(resized)
-    return candidates
+_LOCAL_PIPELINE_USE_DIRECTML: bool | None = None
 
 
 def _to_mobile_wallpaper(image_bytes: bytes, width: int = WALLPAPER_WIDTH, height: int = WALLPAPER_HEIGHT) -> bytes:
@@ -159,105 +83,49 @@ def _resolve_model_source() -> str:
     return settings.local_model_id.strip()
 
 
-def _load_local_pipeline(model_source: str, use_openvino: bool) -> Any:
-    global _LOCAL_PIPELINE, _LOCAL_PIPELINE_SOURCE, _LOCAL_PIPELINE_USE_OPENVINO
+def _load_local_pipeline(model_source: str, use_directml: bool) -> Any:
+    global _LOCAL_PIPELINE, _LOCAL_PIPELINE_SOURCE, _LOCAL_PIPELINE_USE_DIRECTML
     if (
         _LOCAL_PIPELINE is not None
         and _LOCAL_PIPELINE_SOURCE == model_source
-        and _LOCAL_PIPELINE_USE_OPENVINO == use_openvino
+        and _LOCAL_PIPELINE_USE_DIRECTML == use_directml
     ):
         return _LOCAL_PIPELINE
 
-    if use_openvino:
-        _patch_windows_tempfile_cleanup_for_openvino()
+    try:
+        import torch
+        from diffusers import AutoPipelineForText2Image, DPMSolverMultistepScheduler
+    except Exception as exc:
+        raise RuntimeError(
+            "Local SD generation requires `diffusers`, `transformers`, `accelerate`, and `safetensors`. "
+            "Install optional local generation dependencies first."
+        ) from exc
 
-        openvino_pipeline_cls = None
+    pipeline = AutoPipelineForText2Image.from_pretrained(
+        model_source,
+        torch_dtype=torch.float32,
+        safety_checker=None,
+    )
+    pipeline.scheduler = DPMSolverMultistepScheduler.from_config(pipeline.scheduler.config)
+
+    if use_directml:
         try:
-            from optimum.intel.openvino import OVDiffusionPipeline
-
-            openvino_pipeline_cls = OVDiffusionPipeline
-        except Exception:
-            try:
-                from optimum.intel.openvino import OVStableDiffusionPipeline
-
-                openvino_pipeline_cls = OVStableDiffusionPipeline
-            except Exception as exc:
-                raise RuntimeError(
-                    "OpenVINO local generation requires optimum-intel with OpenVINO diffusion pipelines. "
-                    "Install compatible `optimum-intel[openvino]` and OpenVINO runtime packages."
-                ) from exc
-
-        if openvino_pipeline_cls is None:
-            raise RuntimeError(
-                "Failed to resolve an OpenVINO diffusion pipeline class from optimum-intel."
-            )
-
-        source_path = Path(model_source)
-        cached_export_dir = OPENVINO_EXPORT_CACHE_DIR / _safe_model_slug(model_source)
-        load_source = model_source
-        export_model = True
-
-        if source_path.exists():
-            load_source = str(source_path)
-            export_model = not _is_openvino_export_dir(source_path)
-        elif _is_openvino_export_dir(cached_export_dir):
-            load_source = str(cached_export_dir)
-            export_model = False
-
-        ov_kwargs: dict[str, Any] = {"export": export_model, "compile": False}
-        if export_model:
-            cached_export_dir.mkdir(parents=True, exist_ok=True)
-            ov_kwargs["model_save_dir"] = str(cached_export_dir)
-
-        try:
-            pipeline = openvino_pipeline_cls.from_pretrained(load_source, **ov_kwargs)
-        except TypeError:
-            # Backward compatibility for older optimum-intel versions.
-            ov_kwargs.pop("model_save_dir", None)
-            pipeline = openvino_pipeline_cls.from_pretrained(load_source, **ov_kwargs)
-
-        if export_model and not _is_openvino_export_dir(cached_export_dir):
-            try:
-                pipeline.save_pretrained(str(cached_export_dir))
-                logger.info(f"Persisted OpenVINO export cache to {cached_export_dir}")
-            except Exception as exc:
-                logger.warning(f"Failed to persist OpenVINO export cache at {cached_export_dir}: {exc}")
-
-        # If cache exists, always reload from cache to avoid tempfile-backed exports on Windows.
-        if export_model and _is_openvino_export_dir(cached_export_dir):
-            try:
-                pipeline = openvino_pipeline_cls.from_pretrained(
-                    str(cached_export_dir),
-                    export=False,
-                    compile=False,
-                )
-                logger.info(f"Reloaded OpenVINO pipeline from cache: {cached_export_dir}")
-            except Exception as exc:
-                logger.warning(f"Failed to reload OpenVINO pipeline from cache {cached_export_dir}: {exc}")
-
-        pipeline.to(OPENVINO_DEVICE)
-    else:
-        try:
-            import torch
-            from diffusers import AutoPipelineForText2Image, DPMSolverMultistepScheduler
+            import torch_directml
         except Exception as exc:
             raise RuntimeError(
-                "Local SD generation requires `diffusers`, `transformers`, `accelerate`, and `safetensors`. "
-                "Install optional local generation dependencies first."
+                "DirectML local generation requires `torch-directml`. "
+                "Install with: pip install torch-directml"
             ) from exc
 
-        pipeline = AutoPipelineForText2Image.from_pretrained(
-            model_source,
-            torch_dtype=torch.float32,
-            safety_checker=None,
-        )
-        pipeline.scheduler = DPMSolverMultistepScheduler.from_config(pipeline.scheduler.config)
+        dml_device = torch_directml.device(DIRECTML_DEVICE_ID)
+        pipeline = pipeline.to(dml_device)
+    else:
         pipeline = pipeline.to("cpu")
 
     _LOCAL_PIPELINE = pipeline
     _LOCAL_PIPELINE_SOURCE = model_source
-    _LOCAL_PIPELINE_USE_OPENVINO = use_openvino
-    logger.info(f"Loaded local model source={model_source} backend={'openvino' if use_openvino else 'diffusers'}")
+    _LOCAL_PIPELINE_USE_DIRECTML = use_directml
+    logger.info(f"Loaded local model source={model_source} backend={'directml' if use_directml else 'diffusers'}")
     return pipeline
 
 
@@ -283,7 +151,7 @@ def _generate_image_local(prompt: str) -> str:
     if not model_source:
         raise RuntimeError("No local model configured. Set LOCAL_MODEL_PATH or LOCAL_MODEL_ID.")
 
-    pipeline = _load_local_pipeline(model_source=model_source, use_openvino=LOCAL_MODEL_USE_OPENVINO)
+    pipeline = _load_local_pipeline(model_source=model_source, use_directml=LOCAL_MODEL_USE_DIRECTML)
 
     generation_kwargs: dict[str, Any] = {
         "prompt": prompt,
@@ -293,51 +161,17 @@ def _generate_image_local(prompt: str) -> str:
         "height": LOCAL_IMAGE_HEIGHT,
     }
 
-    if LOCAL_SEED >= 0 and not LOCAL_MODEL_USE_OPENVINO:
+    if LOCAL_SEED >= 0 and not LOCAL_MODEL_USE_DIRECTML:
         try:
             import torch
 
             generation_kwargs["generator"] = torch.Generator(device="cpu").manual_seed(LOCAL_SEED)
         except Exception:
             logger.warning("Failed to set LOCAL_SEED generator; continuing without deterministic seed")
+    elif LOCAL_SEED >= 0 and LOCAL_MODEL_USE_DIRECTML:
+        logger.warning("LOCAL_SEED is ignored for DirectML local generation on this backend")
 
-    if LOCAL_MODEL_USE_OPENVINO and OPENVINO_OOM_AUTO_RETRY:
-        size_candidates = _openvino_size_candidates(LOCAL_IMAGE_WIDTH, LOCAL_IMAGE_HEIGHT)
-        last_error: Exception | None = None
-        result = None
-        did_cpu_fallback = False
-        for width, height in size_candidates:
-            try:
-                if width != LOCAL_IMAGE_WIDTH or height != LOCAL_IMAGE_HEIGHT:
-                    logger.warning(
-                        f"Retrying OpenVINO generation with reduced size to avoid GPU OOM: {width}x{height}"
-                    )
-                generation_kwargs["width"] = width
-                generation_kwargs["height"] = height
-                result = pipeline(**generation_kwargs)
-                break
-            except Exception as exc:
-                last_error = exc
-                if (
-                    OPENVINO_GPU_FALLBACK_TO_CPU
-                    and not did_cpu_fallback
-                    and str(OPENVINO_DEVICE).upper().startswith("GPU")
-                    and _is_openvino_gpu_runtime_error(exc)
-                ):
-                    logger.warning(
-                        "OpenVINO GPU runtime failure detected; retrying on CPU backend for stability."
-                    )
-                    pipeline.to("CPU")
-                    did_cpu_fallback = True
-                    continue
-                if _is_openvino_memory_error(exc) and (width, height) != size_candidates[-1]:
-                    continue
-                raise
-
-        if result is None:
-            raise RuntimeError(f"OpenVINO generation failed after OOM retries. Last error: {last_error}")
-    else:
-        result = pipeline(**generation_kwargs)
+    result = pipeline(**generation_kwargs)
 
     image = result.images[0]
     return _save_image_as_wallpaper(image)

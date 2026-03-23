@@ -76,13 +76,9 @@ numba==0.64.0
 numpy==1.26.4
 onnx==1.20.1
 onnxruntime-directml==1.23.0
-onnxruntime-openvino==1.23.0
 openai==1.68.2
 opencv-python==4.11.0.86
-openvino==2024.4.0
-openvino-telemetry==2025.2.0
 optimum==1.22.0
-optimum-intel==1.19.0
 packaging==24.2
 pandas==2.3.3
 peft==0.10.0
