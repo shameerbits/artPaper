@@ -203,7 +203,32 @@ python app.py generate_only
 python app.py download_model --model-id runwayml/stable-diffusion-v1-5
 python app.py auth_deviantart
 python app.py serve --host 0.0.0.0 --port 8000
+streamlit run app.py
 ```
+
+## Streamlit queue app
+
+- Configuration can be saved from the UI and is written to `ai_art_bot/data/web_settings.json`.
+- All non-secret runtime options are configurable in the UI.
+- API keys and secrets are not editable in the UI; they must be set via environment variables or Streamlit secrets.
+- The UI shows secret availability and validates required credentials for the selected task mode before allowing queue submission.
+- Manual prompt tasks can be queued with prompt mode options:
+	- `as_is`: use your prompt exactly as provided.
+	- `reformat`: convert your prompt into a cleaner natural-language generation prompt.
+- Pipeline task modes supported in the queue:
+	- `generate_only`
+	- `generate_upscale`
+	- `full` (generate + upscale + upload)
+	- `upscale_only`
+	- `upload_only`
+	- `upscale_upload`
+- Queue status tracking includes `queued`, `running`, `success`, `failure`, and `no_info`.
+
+Deployment behavior:
+
+- Deployed Streamlit mode shows only manual prompt queue controls and task status.
+- Local Streamlit mode includes full settings editor, queue list, and manual one-by-one run controls.
+- Set `APP_STREAMLIT_DEPLOYED=true` to force deployed mode behavior.
 
 ## Dashboard
 

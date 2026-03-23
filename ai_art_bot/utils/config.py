@@ -11,6 +11,43 @@ UPSCALED_DIR = DATA_DIR / "upscaled"
 PROMPTS_FILE = BASE_DIR / "prompts.txt"
 DB_PATH = DATA_DIR / "images.db"
 DEVIANTART_TOKENS_PATH = DATA_DIR / "deviantart_tokens.json"
+WEB_SETTINGS_PATH = DATA_DIR / "web_settings.json"
+
+WEB_CONFIG_KEYS = [
+    "IMAGE_BACKEND",
+    "LOCAL_MODEL_ID",
+    "LOCAL_MODEL_PATH",
+    "LOCAL_MODEL_USE_OPENVINO",
+    "LOCAL_IMAGE_WIDTH",
+    "LOCAL_IMAGE_HEIGHT",
+    "LOCAL_NUM_INFERENCE_STEPS",
+    "LOCAL_GUIDANCE_SCALE",
+    "LOCAL_SEED",
+    "UPSCALER_BACKEND",
+    "REPLICATE_UPSCALER_MODEL",
+    "REPLICATE_UPSCALER_SCALE",
+    "REALESRGAN_MODEL_NAME",
+    "REALESRGAN_OUTSCALE",
+    "REALESRGAN_TILE",
+    "REALESRGAN_TILE_PAD",
+    "REALESRGAN_PRE_PAD",
+    "REALESRGAN_MAX_INPUT_SIDE",
+    "REALESRGAN_MAX_INPUT_PIXELS",
+    "OPENVINO_DEVICE",
+    "DEVIANTART_USERNAME",
+    "DEVIANTART_PUBLISH",
+    "PROMPT_ENHANCER_MODEL",
+    "ENABLE_PROMPT_ENHANCER",
+]
+
+SECRET_ENV_KEYS = [
+    "OPENAI_API_KEY",
+    "REPLICATE_API_TOKEN",
+    "DEVIANTART_CLIENT_ID",
+    "DEVIANTART_CLIENT_SECRET",
+    "DEVIANTART_REFRESH_TOKEN",
+    "DEVIANTART_ACCESS_TOKEN",
+]
 
 
 @dataclass(frozen=True)
@@ -55,6 +92,30 @@ class Settings:
 def ensure_directories() -> None:
     for directory in (DATA_DIR, GENERATED_DIR, UPSCALED_DIR):
         directory.mkdir(parents=True, exist_ok=True)
+
+
+def load_web_settings() -> dict[str, str]:
+    ensure_directories()
+    if not WEB_SETTINGS_PATH.exists():
+        return {}
+    try:
+        payload = json.loads(WEB_SETTINGS_PATH.read_text(encoding="utf-8"))
+    except Exception:
+        return {}
+    if not isinstance(payload, dict):
+        return {}
+    return {str(key): str(value) for key, value in payload.items() if value is not None}
+
+
+def save_web_settings(settings: dict[str, str]) -> None:
+    ensure_directories()
+    cleaned = {str(key): str(value) for key, value in settings.items() if value is not None}
+    WEB_SETTINGS_PATH.write_text(json.dumps(cleaned, indent=2), encoding="utf-8")
+
+
+def apply_web_settings_to_env(settings: dict[str, str]) -> None:
+    for key, value in settings.items():
+        os.environ[str(key)] = str(value)
 
 
 def has_local_deviantart_tokens() -> bool:

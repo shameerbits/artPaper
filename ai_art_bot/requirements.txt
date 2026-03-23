@@ -17,6 +17,7 @@ replicate==1.0.4
 requests==2.32.3
 opencv-python==4.11.0.86
 uvicorn==0.34.0
+streamlit==1.44.1
 
 # Optional local SD generation dependencies:
 # diffusers==0.32.2
