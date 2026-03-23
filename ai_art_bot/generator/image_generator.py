@@ -33,6 +33,60 @@ _LOCAL_PIPELINE_SOURCE: str | None = None
 _LOCAL_PIPELINE_USE_DIRECTML: bool | None = None
 
 
+def _cast_scheduler_tensors_to_float32(scheduler: Any) -> None:
+    """Best-effort cast of known scheduler runtime tensors to float32."""
+    try:
+        import torch
+    except Exception:
+        return
+
+    tensor_attrs = (
+        "timesteps",
+        "sigmas",
+        "init_noise_sigma",
+        "alphas_cumprod",
+        "sqrt_alphas_cumprod",
+        "sqrt_one_minus_alphas_cumprod",
+        "sigmas_up",
+        "sigmas_down",
+        "lambda_t",
+    )
+
+    for name in tensor_attrs:
+        value = getattr(scheduler, name, None)
+        if isinstance(value, torch.Tensor):
+            setattr(scheduler, name, value.to(dtype=torch.float32))
+            continue
+
+        if isinstance(value, list):
+            converted = [item.to(dtype=torch.float32) if isinstance(item, torch.Tensor) else item for item in value]
+            setattr(scheduler, name, converted)
+            continue
+
+        if isinstance(value, tuple):
+            converted = tuple(item.to(dtype=torch.float32) if isinstance(item, torch.Tensor) else item for item in value)
+            setattr(scheduler, name, converted)
+
+
+def _patch_scheduler_for_directml_float32(pipeline: Any) -> None:
+    """Ensure scheduler-generated runtime tensors stay float32 on DirectML."""
+    scheduler = getattr(pipeline, "scheduler", None)
+    if scheduler is None or getattr(scheduler, "_dml_float32_patched", False):
+        return
+
+    original_set_timesteps = getattr(scheduler, "set_timesteps", None)
+    if callable(original_set_timesteps):
+        def _set_timesteps_float32(*args: Any, **kwargs: Any) -> Any:
+            result = original_set_timesteps(*args, **kwargs)
+            _cast_scheduler_tensors_to_float32(scheduler)
+            return result
+
+        scheduler.set_timesteps = _set_timesteps_float32  # type: ignore[method-assign]
+
+    _cast_scheduler_tensors_to_float32(scheduler)
+    setattr(scheduler, "_dml_float32_patched", True)
+
+
 def _to_mobile_wallpaper(image_bytes: bytes, width: int = WALLPAPER_WIDTH, height: int = WALLPAPER_HEIGHT) -> bytes:
     """Center-crop and resize to an exact mobile wallpaper aspect ratio (default 9:16)."""
     target_ratio = width / height
@@ -119,6 +173,7 @@ def _load_local_pipeline(model_source: str, use_directml: bool) -> Any:
 
         dml_device = torch_directml.device(DIRECTML_DEVICE_ID)
         pipeline = pipeline.to(dml_device)
+        _patch_scheduler_for_directml_float32(pipeline)
     else:
         pipeline = pipeline.to("cpu")
 
@@ -171,7 +226,20 @@ def _generate_image_local(prompt: str) -> str:
     elif LOCAL_SEED >= 0 and LOCAL_MODEL_USE_DIRECTML:
         logger.warning("LOCAL_SEED is ignored for DirectML local generation on this backend")
 
-    result = pipeline(**generation_kwargs)
+    if LOCAL_MODEL_USE_DIRECTML:
+        try:
+            import torch
+
+            default_dtype = torch.get_default_dtype()
+            torch.set_default_dtype(torch.float32)
+            try:
+                result = pipeline(**generation_kwargs)
+            finally:
+                torch.set_default_dtype(default_dtype)
+        except Exception:
+            result = pipeline(**generation_kwargs)
+    else:
+        result = pipeline(**generation_kwargs)
 
     image = result.images[0]
     return _save_image_as_wallpaper(image)
