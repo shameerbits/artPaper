@@ -159,24 +159,190 @@ def _render_settings_editor(saved_settings: dict[str, str]) -> dict[str, str]:
     st.caption("Save once, and each queued task captures a snapshot of these values.")
 
     settings_payload: dict[str, str] = {}
-    columns = st.columns(2)
-    for index, key in enumerate(WEB_CONFIG_KEYS):
-        column = columns[index % 2]
-        default_value = saved_settings.get(key, os.getenv(key, ""))
-        widget_key = f"cfg_{key}"
-        settings_payload[key] = column.text_input(
-            key,
-            value=default_value,
-            type="default",
-            key=widget_key,
+
+    # Image Backend Selection
+    st.markdown("##### Image Generation Backend")
+    image_backend = st.selectbox(
+        "IMAGE_BACKEND",
+        options=["openai", "local_sd"],
+        index=0 if saved_settings.get("IMAGE_BACKEND", "openai").lower() == "openai" else 1,
+        key="cfg_IMAGE_BACKEND",
+    )
+    settings_payload["IMAGE_BACKEND"] = image_backend
+
+    # Conditional settings for LOCAL_SD
+    if image_backend == "local_sd":
+        col1, col2 = st.columns(2)
+        with col1:
+            settings_payload["LOCAL_MODEL_ID"] = st.text_input(
+                "LOCAL_MODEL_ID",
+                value=saved_settings.get("LOCAL_MODEL_ID", os.getenv("LOCAL_MODEL_ID", "runwayml/stable-diffusion-v1-5")),
+                key="cfg_LOCAL_MODEL_ID",
+            )
+            settings_payload["LOCAL_MODEL_PATH"] = st.text_input(
+                "LOCAL_MODEL_PATH (optional)",
+                value=saved_settings.get("LOCAL_MODEL_PATH", os.getenv("LOCAL_MODEL_PATH", "")),
+                key="cfg_LOCAL_MODEL_PATH",
+            )
+        with col2:
+            settings_payload["LOCAL_IMAGE_WIDTH"] = st.number_input(
+                "LOCAL_IMAGE_WIDTH",
+                value=int(saved_settings.get("LOCAL_IMAGE_WIDTH", os.getenv("LOCAL_IMAGE_WIDTH", "768"))),
+                key="cfg_LOCAL_IMAGE_WIDTH",
+            )
+            settings_payload["LOCAL_IMAGE_HEIGHT"] = st.number_input(
+                "LOCAL_IMAGE_HEIGHT",
+                value=int(saved_settings.get("LOCAL_IMAGE_HEIGHT", os.getenv("LOCAL_IMAGE_HEIGHT", "1344"))),
+                key="cfg_LOCAL_IMAGE_HEIGHT",
+            )
+
+        col1, col2 = st.columns(2)
+        with col1:
+            settings_payload["LOCAL_NUM_INFERENCE_STEPS"] = st.number_input(
+                "LOCAL_NUM_INFERENCE_STEPS",
+                value=int(saved_settings.get("LOCAL_NUM_INFERENCE_STEPS", os.getenv("LOCAL_NUM_INFERENCE_STEPS", "24"))),
+                key="cfg_LOCAL_NUM_INFERENCE_STEPS",
+            )
+            settings_payload["LOCAL_GUIDANCE_SCALE"] = st.text_input(
+                "LOCAL_GUIDANCE_SCALE",
+                value=saved_settings.get("LOCAL_GUIDANCE_SCALE", os.getenv("LOCAL_GUIDANCE_SCALE", "7.0")),
+                key="cfg_LOCAL_GUIDANCE_SCALE",
+            )
+        with col2:
+            settings_payload["LOCAL_SEED"] = st.text_input(
+                "LOCAL_SEED",
+                value=saved_settings.get("LOCAL_SEED", os.getenv("LOCAL_SEED", "-1")),
+                key="cfg_LOCAL_SEED",
+            )
+            settings_payload["LOCAL_MODEL_USE_OPENVINO"] = st.selectbox(
+                "LOCAL_MODEL_USE_OPENVINO",
+                options=["false", "true"],
+                index=1 if saved_settings.get("LOCAL_MODEL_USE_OPENVINO", "false").lower() == "true" else 0,
+                key="cfg_LOCAL_MODEL_USE_OPENVINO",
+            )
+
+    # Upscaler Backend Selection
+    st.markdown("##### Upscaler Backend")
+    upscaler_backend = st.selectbox(
+        "UPSCALER_BACKEND",
+        options=["realesrgan", "replicate", "directml", "openvino"],
+        index=0,
+        key="cfg_UPSCALER_BACKEND",
+    )
+    settings_payload["UPSCALER_BACKEND"] = upscaler_backend
+
+    # Conditional settings for UPSCALER
+    if upscaler_backend == "replicate":
+        settings_payload["REPLICATE_UPSCALER_MODEL"] = st.text_input(
+            "REPLICATE_UPSCALER_MODEL",
+            value=saved_settings.get("REPLICATE_UPSCALER_MODEL", os.getenv("REPLICATE_UPSCALER_MODEL", "")),
+            key="cfg_REPLICATE_UPSCALER_MODEL",
+        )
+        settings_payload["REPLICATE_UPSCALER_SCALE"] = st.text_input(
+            "REPLICATE_UPSCALER_SCALE",
+            value=saved_settings.get("REPLICATE_UPSCALER_SCALE", os.getenv("REPLICATE_UPSCALER_SCALE", "4")),
+            key="cfg_REPLICATE_UPSCALER_SCALE",
+        )
+    elif upscaler_backend == "realesrgan":
+        col1, col2 = st.columns(2)
+        with col1:
+            settings_payload["REALESRGAN_MODEL_NAME"] = st.text_input(
+                "REALESRGAN_MODEL_NAME",
+                value=saved_settings.get("REALESRGAN_MODEL_NAME", os.getenv("REALESRGAN_MODEL_NAME", "RealESRGAN_x4plus")),
+                key="cfg_REALESRGAN_MODEL_NAME",
+            )
+            settings_payload["REALESRGAN_TILE"] = st.number_input(
+                "REALESRGAN_TILE",
+                value=int(saved_settings.get("REALESRGAN_TILE", os.getenv("REALESRGAN_TILE", "256"))),
+                key="cfg_REALESRGAN_TILE",
+            )
+        with col2:
+            settings_payload["REALESRGAN_TILE_PAD"] = st.number_input(
+                "REALESRGAN_TILE_PAD",
+                value=int(saved_settings.get("REALESRGAN_TILE_PAD", os.getenv("REALESRGAN_TILE_PAD", "10"))),
+                key="cfg_REALESRGAN_TILE_PAD",
+            )
+            settings_payload["REALESRGAN_PRE_PAD"] = st.number_input(
+                "REALESRGAN_PRE_PAD",
+                value=int(saved_settings.get("REALESRGAN_PRE_PAD", os.getenv("REALESRGAN_PRE_PAD", "0"))),
+                key="cfg_REALESRGAN_PRE_PAD",
+            )
+    elif upscaler_backend in {"directml", "openvino"}:
+        settings_payload["OPENVINO_DEVICE"] = st.text_input(
+            "OPENVINO_DEVICE",
+            value=saved_settings.get("OPENVINO_DEVICE", os.getenv("OPENVINO_DEVICE", "GPU_FP32")),
+            key="cfg_OPENVINO_DEVICE",
         )
 
-    if st.button("Save Configuration", use_container_width=True):
+    # DeviantArt Settings
+    st.markdown("##### DeviantArt Upload")
+    col1, col2 = st.columns(2)
+    with col1:
+        settings_payload["DEVIANTART_USERNAME"] = st.text_input(
+            "DEVIANTART_USERNAME",
+            value=saved_settings.get("DEVIANTART_USERNAME", os.getenv("DEVIANTART_USERNAME", "")),
+            key="cfg_DEVIANTART_USERNAME",
+        )
+    with col2:
+        settings_payload["DEVIANTART_PUBLISH"] = st.selectbox(
+            "DEVIANTART_PUBLISH",
+            options=["true", "false"],
+            index=0 if saved_settings.get("DEVIANTART_PUBLISH", "true").lower() == "true" else 1,
+            key="cfg_DEVIANTART_PUBLISH",
+        )
+
+    # Prompt Enhancement
+    st.markdown("##### Prompt Enhancement")
+    col1, col2 = st.columns(2)
+    with col1:
+        settings_payload["ENABLE_PROMPT_ENHANCER"] = st.selectbox(
+            "ENABLE_PROMPT_ENHANCER",
+            options=["true", "false"],
+            index=0 if saved_settings.get("ENABLE_PROMPT_ENHANCER", "true").lower() == "true" else 1,
+            key="cfg_ENABLE_PROMPT_ENHANCER",
+        )
+    with col2:
+        settings_payload["PROMPT_ENHANCER_MODEL"] = st.text_input(
+            "PROMPT_ENHANCER_MODEL",
+            value=saved_settings.get("PROMPT_ENHANCER_MODEL", os.getenv("PROMPT_ENHANCER_MODEL", "gpt-4-mini")),
+            key="cfg_PROMPT_ENHANCER_MODEL",
+        )
+
+    if st.button("Save Configuration", use_container_width=True, type="primary"):
         save_web_settings(settings_payload)
         apply_web_settings_to_env(settings_payload)
         st.success("Configuration saved to ai_art_bot/data/web_settings.json")
+        st.rerun()
 
     return settings_payload
+
+
+def _get_prompt_library_path() -> str:
+    from pathlib import Path
+    prompt_lib_path = Path(__file__).resolve().parents[1] / "data" / "prompt_library.json"
+    return str(prompt_lib_path)
+
+
+def _load_prompt_library() -> dict[str, Any]:
+    import json
+    from pathlib import Path
+    path = _get_prompt_library_path()
+    if Path(path).exists():
+        try:
+            with open(path, "r") as f:
+                return json.load(f)
+        except Exception:
+            return {}
+    return {}
+
+
+def _save_prompt_library(library: dict[str, Any]) -> None:
+    import json
+    from pathlib import Path
+    path = _get_prompt_library_path()
+    Path(path).parent.mkdir(parents=True, exist_ok=True)
+    with open(path, "w") as f:
+        json.dump(library, f, indent=2)
 
 
 def _render_manual_prompt_panel(
@@ -186,66 +352,151 @@ def _render_manual_prompt_panel(
 ) -> None:
     import streamlit as st
 
-    st.subheader("Manual Prompt Queue")
-    manual_prompt = st.text_area("Manual prompt", height=140, placeholder="Describe your image...")
-    prompt_mode = st.radio(
-        "Prompt handling",
-        options=["as_is", "reformat"],
-        format_func=lambda value: "Use as-is" if value == "as_is" else "Reformat prompt",
-        horizontal=True,
-    )
-    pipeline_mode = st.selectbox(
-        "Task mode",
-        options=["generate_only", "generate_upscale", "full", "upscale_only", "upload_only", "upscale_upload"],
-        index=2,
-    )
+    library = _load_prompt_library()
+    task_list = runner.get_queue(limit=500)
+    queued_prompts = {task.get("prompt", "").strip() for task in task_list if task.get("prompt")}
 
-    source_image_path = ""
-    source_upscaled_path = ""
-    if pipeline_mode in {"upscale_only", "upscale_upload", "upload_only"}:
-        source_image_path = st.text_input("Source image path (needed for upscale/upload modes)")
-    if pipeline_mode in {"upload_only"}:
-        source_upscaled_path = st.text_input("Source upscaled path (optional, preferred for upload)")
+    st.subheader("Prompt Management")
+    
+    tab1, tab2 = st.tabs(["Prompt Library", "Create Task from Prompt"])
+    
+    # TAB 1: Prompt Library
+    with tab1:
+        st.markdown("#### Add to Prompt Library")
+        col1, col2 = st.columns([3, 1])
+        with col1:
+            new_prompt = st.text_area(
+                "Add new prompt",
+                height=100,
+                placeholder="Describe your image...",
+                key="new_prompt_input",
+            )
+        with col2:
+            st.markdown("")
+            st.markdown("")
+            if st.button("Add to Library", use_container_width=True, type="primary"):
+                if new_prompt.strip():
+                    prompt_id = len(library) + 1
+                    library[str(prompt_id)] = {
+                        "text": new_prompt.strip(),
+                        "added_at": str(__import__("datetime").datetime.now()),
+                    }
+                    _save_prompt_library(library)
+                    st.success(f"Prompt added to library")
+                    st.rerun()
+                else:
+                    st.error("Prompt cannot be empty")
 
-    start_immediately_default = True if deployed_mode else False
-    start_immediately = st.checkbox("Start immediately after queueing", value=start_immediately_default)
+        st.markdown("#### Saved Prompts")
+        if library:
+            # Sort by ID descending (latest first)
+            sorted_prompts = sorted(library.items(), key=lambda x: int(x[0]), reverse=True)
+            
+            # Build table data
+            table_data = []
+            for prompt_id, prompt_data in sorted_prompts:
+                in_queue = "✓ Yes" if prompt_data.get("text", "").strip() in queued_prompts else "✗ No"
+                table_data.append({
+                    "ID": prompt_id,
+                    "Prompt": prompt_data.get("text", "")[:80] + "..." if len(prompt_data.get("text", "")) > 80 else prompt_data.get("text", ""),
+                    "Added": prompt_data.get("added_at", "")[:10],
+                    "In Queue": in_queue,
+                })
+            
+            st.dataframe(table_data, use_container_width=True, hide_index=True)
+        else:
+            st.info("No prompts in library yet. Add one above!")
 
-    required_secrets, missing_secrets = _required_secrets_for_mode(st, pipeline_mode, task_settings)
-
-    if required_secrets:
-        st.caption("Required secrets for selected mode: " + ", ".join(required_secrets))
-
-    if missing_secrets:
-        st.error("Missing required secrets: " + ", ".join(missing_secrets))
-    else:
-        st.success("Credential validation passed for selected mode")
-
-    can_submit = not missing_secrets
-
-    if st.button("Add Task To Queue", type="primary", use_container_width=True, disabled=not can_submit):
-        if not manual_prompt.strip():
-            st.error("Manual prompt is required")
-            return
-
-        task_id = runner.enqueue_manual_task(
-            prompt=manual_prompt,
-            prompt_mode=prompt_mode,
-            pipeline_mode=pipeline_mode,
-            settings=task_settings,
-            source_image_path=source_image_path or None,
-            source_upscaled_path=source_upscaled_path or None,
+    # TAB 2: Create Task from Prompt
+    with tab2:
+        st.markdown("#### Create Task from Prompt")
+        
+        # Select prompt from library or enter manually
+        prompt_source = st.radio(
+            "Prompt source",
+            options=["from_library", "manual"],
+            format_func=lambda x: "From Library" if x == "from_library" else "Enter Manually",
+            horizontal=True,
         )
-        st.success(f"Task #{task_id} added to queue")
 
-        if start_immediately:
-            with st.spinner("Processing task..."):
-                result = runner.process_task(task_id)
-            if result.get("status") == "success":
-                st.success(f"Task #{task_id} finished successfully")
-            elif result.get("status") == "no_info":
-                st.warning(result.get("message", "No info"))
+        manual_prompt = ""
+        if prompt_source == "from_library" and library:
+            sorted_prompts = sorted(library.items(), key=lambda x: int(x[0]), reverse=True)
+            prompt_options = {f"#{pid}: {data.get('text', '')[:60]}...": data.get('text', '') 
+                            for pid, data in sorted_prompts}
+            selected = st.selectbox("Select a prompt", options=list(prompt_options.keys()))
+            manual_prompt = prompt_options[selected]
+        elif prompt_source == "from_library":
+            st.warning("No prompts in library. Add some prompts first!")
+        else:
+            manual_prompt = st.text_area(
+                "Enter prompt manually",
+                height=140,
+                placeholder="Describe your image...",
+                key="manual_prompt_input",
+            )
+
+        col1, col2 = st.columns(2)
+        with col1:
+            prompt_mode = st.radio(
+                "Prompt handling",
+                options=["as_is", "reformat"],
+                format_func=lambda value: "Use as-is" if value == "as_is" else "Reformat prompt",
+                horizontal=True,
+            )
+        with col2:
+            pipeline_mode = st.selectbox(
+                "Task mode",
+                options=["generate_only", "generate_upscale", "full", "upscale_only", "upload_only", "upscale_upload"],
+                index=2,
+            )
+
+        source_image_path = ""
+        source_upscaled_path = ""
+        if pipeline_mode in {"upscale_only", "upscale_upload", "upload_only"}:
+            source_image_path = st.text_input("Source image path (needed for upscale/upload modes)")
+        if pipeline_mode in {"upload_only"}:
+            source_upscaled_path = st.text_input("Source upscaled path (optional, preferred for upload)")
+
+        start_immediately_default = True if deployed_mode else False
+        start_immediately = st.checkbox("Start immediately after queueing", value=start_immediately_default)
+
+        required_secrets, missing_secrets = _required_secrets_for_mode(st, pipeline_mode, task_settings)
+
+        if required_secrets:
+            st.caption("Required secrets for selected mode: " + ", ".join(required_secrets))
+
+        if missing_secrets:
+            st.error("Missing required secrets: " + ", ".join(missing_secrets))
+        else:
+            st.success("Credential validation passed for selected mode")
+
+        can_submit = not missing_secrets
+
+        if st.button("Add Task To Queue", type="primary", use_container_width=True, disabled=not can_submit):
+            if not manual_prompt.strip():
+                st.error("Prompt is required")
             else:
-                st.error(f"Task #{task_id} failed: {result.get('error', 'unknown error')}")
+                task_id = runner.enqueue_manual_task(
+                    prompt=manual_prompt,
+                    prompt_mode=prompt_mode,
+                    pipeline_mode=pipeline_mode,
+                    settings=task_settings,
+                    source_image_path=source_image_path or None,
+                    source_upscaled_path=source_upscaled_path or None,
+                )
+                st.success(f"Task #{task_id} added to queue")
+
+                if start_immediately:
+                    with st.spinner("Processing task..."):
+                        result = runner.process_task(task_id)
+                    if result.get("status") == "success":
+                        st.success(f"Task #{task_id} finished successfully")
+                    elif result.get("status") == "no_info":
+                        st.warning(result.get("message", "No info"))
+                    else:
+                        st.error(f"Task #{task_id} failed: {result.get('error', 'unknown error')}")
+                st.rerun()
 
 
 def _render_queue_status_panel(runner: PipelineRunner, deployed_mode: bool) -> None:
