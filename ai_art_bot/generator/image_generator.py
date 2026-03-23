@@ -1,5 +1,6 @@
 import base64
 import os
+import tempfile
 from datetime import datetime, timezone
 from io import BytesIO
 from pathlib import Path
@@ -31,6 +32,36 @@ OPENVINO_EXPORT_CACHE_DIR = Path(
 _LOCAL_PIPELINE: Any | None = None
 _LOCAL_PIPELINE_SOURCE: str | None = None
 _LOCAL_PIPELINE_USE_OPENVINO: bool | None = None
+
+
+def _patch_windows_tempfile_cleanup_for_openvino() -> None:
+    if os.name != "nt":
+        return
+    if os.getenv("OPENVINO_WINDOWS_TEMPFILE_CLEANUP_PATCH", "true").strip().lower() not in {"1", "true", "yes"}:
+        return
+
+    temp_dir_cls = tempfile.TemporaryDirectory
+    if getattr(temp_dir_cls, "_artpaper_openvino_patch", False):
+        return
+
+    original_rmtree = temp_dir_cls._rmtree
+
+    @classmethod
+    def _patched_rmtree(cls, name: str, *args: Any, **kwargs: Any) -> None:
+        kwargs["ignore_errors"] = True
+        try:
+            original_rmtree(name, *args, **kwargs)
+        except (PermissionError, FileNotFoundError, NotADirectoryError):
+            # OpenVINO can keep temp model files locked briefly on Windows at shutdown.
+            return
+        except OSError as exc:
+            if getattr(exc, "winerror", None) in {3, 5, 32, 145, 267}:
+                return
+            raise
+
+    temp_dir_cls._rmtree = _patched_rmtree
+    temp_dir_cls._artpaper_openvino_patch = True
+    logger.info("Applied Windows tempfile cleanup patch for OpenVINO shutdown stability")
 
 
 def _safe_model_slug(model_source: str) -> str:
@@ -130,6 +161,8 @@ def _load_local_pipeline(model_source: str, use_openvino: bool) -> Any:
         return _LOCAL_PIPELINE
 
     if use_openvino:
+        _patch_windows_tempfile_cleanup_for_openvino()
+
         openvino_pipeline_cls = None
         try:
             from optimum.intel.openvino import OVDiffusionPipeline
