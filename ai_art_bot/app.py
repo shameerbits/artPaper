@@ -11,8 +11,6 @@ from generator.image_generator import download_local_model
 from scheduler.scheduler import PipelineRunner
 from uploader.deviantart_upload import bootstrap_tokens
 from utils.config import (
-    ACCEL_DEFAULT_ONNX_MODEL_PATH,
-    MODELS_DIR,
     SECRET_ENV_KEYS,
     WEB_CONFIG_KEYS,
     apply_web_settings_to_env,
@@ -183,7 +181,7 @@ def _render_settings_editor(saved_settings: dict[str, str]) -> dict[str, str]:
             )
             settings_payload["LOCAL_MODEL_PATH"] = st.text_input(
                 "LOCAL_MODEL_PATH (optional)",
-                value=saved_settings.get("LOCAL_MODEL_PATH", os.getenv("LOCAL_MODEL_PATH", str(MODELS_DIR / "stable-diffusion-v1-5"))),
+                value=saved_settings.get("LOCAL_MODEL_PATH", os.getenv("LOCAL_MODEL_PATH", "./models/stable-diffusion-v1-5")),
                 key="cfg_LOCAL_MODEL_PATH",
             )
         with col2:
@@ -278,7 +276,7 @@ def _render_settings_editor(saved_settings: dict[str, str]) -> dict[str, str]:
                 "ACCEL_ONNX_MODEL_PATH",
                 value=saved_settings.get(
                     "ACCEL_ONNX_MODEL_PATH",
-                    os.getenv("ACCEL_ONNX_MODEL_PATH", str(ACCEL_DEFAULT_ONNX_MODEL_PATH)),
+                    os.getenv("ACCEL_ONNX_MODEL_PATH", "./weights/realesrgan_x4.onnx"),
                 ),
                 key="cfg_ACCEL_ONNX_MODEL_PATH",
             )
@@ -322,7 +320,7 @@ def _render_settings_editor(saved_settings: dict[str, str]) -> dict[str, str]:
                 "ACCEL_ONNX_MODEL_PATH",
                 value=saved_settings.get(
                     "ACCEL_ONNX_MODEL_PATH",
-                    os.getenv("ACCEL_ONNX_MODEL_PATH", str(ACCEL_DEFAULT_ONNX_MODEL_PATH)),
+                    os.getenv("ACCEL_ONNX_MODEL_PATH", "./weights/realesrgan_x4.onnx"),
                 ),
                 key="cfg_ACCEL_ONNX_MODEL_PATH",
             )
@@ -698,7 +696,7 @@ def main() -> None:
     )
     parser.add_argument(
         "--local-dir",
-        default=os.getenv("LOCAL_MODELS_DIR", str(MODELS_DIR)),
+        default=os.getenv("LOCAL_MODELS_DIR", "./models"),
         help="Destination directory for downloaded local model",
     )
     args = parser.parse_args()
