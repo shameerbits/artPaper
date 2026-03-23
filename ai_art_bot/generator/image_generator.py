@@ -20,6 +20,9 @@ LOCAL_IMAGE_HEIGHT = int(os.getenv("LOCAL_IMAGE_HEIGHT", str(WALLPAPER_HEIGHT)))
 LOCAL_NUM_INFERENCE_STEPS = int(os.getenv("LOCAL_NUM_INFERENCE_STEPS", "24"))
 LOCAL_GUIDANCE_SCALE = float(os.getenv("LOCAL_GUIDANCE_SCALE", "7.0"))
 LOCAL_SEED = int(os.getenv("LOCAL_SEED", "-1"))
+LOCAL_ENABLE_LONG_PROMPTS = (
+    os.getenv("LOCAL_ENABLE_LONG_PROMPTS", "true").strip().lower() in {"1", "true", "yes"}
+)
 LOCAL_DIRECTML_FALLBACK_TO_CPU = (
     os.getenv("LOCAL_DIRECTML_FALLBACK_TO_CPU", "true").strip().lower() in {"1", "true", "yes"}
 )
@@ -34,6 +37,64 @@ DIRECTML_DEVICE_ID = max(int(os.getenv("DIRECTML_DEVICE_ID", "0")), 0)
 _LOCAL_PIPELINE: Any | None = None
 _LOCAL_PIPELINE_SOURCE: str | None = None
 _LOCAL_PIPELINE_USE_DIRECTML: bool | None = None
+_DIRECTML_CAUSAL_MASK_PATCHED = False
+
+
+def _patch_transformers_causal_mask_for_directml() -> None:
+    """Patch Transformers causal mask creation to avoid Float64 ops on DirectML backends."""
+    global _DIRECTML_CAUSAL_MASK_PATCHED
+    if _DIRECTML_CAUSAL_MASK_PATCHED:
+        return
+
+    try:
+        import torch
+        from transformers.modeling_attn_mask_utils import AttentionMaskConverter
+    except Exception:
+        return
+
+    original_make_causal_mask = getattr(AttentionMaskConverter, "_make_causal_mask", None)
+    if original_make_causal_mask is None:
+        return
+
+    def _make_causal_mask_directml_safe(
+        input_ids_shape: Any,
+        dtype: Any,
+        device: Any,
+        past_key_values_length: int = 0,
+        sliding_window: int | None = None,
+    ) -> Any:
+        bsz, tgt_len = input_ids_shape
+        cpu_device = torch.device("cpu")
+        min_value = torch.finfo(dtype).min
+
+        # Build on CPU first to avoid DirectML kernels that may implicitly request Float64.
+        mask = torch.full((tgt_len, tgt_len), min_value, dtype=dtype, device=cpu_device)
+        mask_cond = torch.arange(mask.size(-1), device=cpu_device)
+        mask.masked_fill_(mask_cond < (mask_cond + 1).view(mask.size(-1), 1), 0)
+
+        if past_key_values_length > 0:
+            prefix = torch.zeros((tgt_len, past_key_values_length), dtype=dtype, device=cpu_device)
+            mask = torch.cat([prefix, mask], dim=-1)
+
+        if sliding_window is not None:
+            diagonal = past_key_values_length - sliding_window + 1
+            context_mask = torch.triu(torch.ones_like(mask, dtype=torch.bool), diagonal=diagonal)
+            mask.masked_fill_(context_mask, min_value)
+
+        mask = mask[None, None, :, :].expand(bsz, 1, tgt_len, tgt_len + past_key_values_length)
+
+        if device is not None:
+            try:
+                target_device = torch.device(device)
+            except Exception:
+                target_device = device
+            if str(target_device) != "cpu":
+                mask = mask.to(device=target_device, dtype=dtype)
+        return mask
+
+    setattr(AttentionMaskConverter, "_make_causal_mask", staticmethod(_make_causal_mask_directml_safe))
+    _DIRECTML_CAUSAL_MASK_PATCHED = True
+    logger.info("Applied DirectML-safe patch for transformers causal attention mask")
 
 
 def _cast_scheduler_tensors_to_float32(scheduler: Any) -> None:
@@ -174,6 +235,7 @@ def _load_local_pipeline(model_source: str, use_directml: bool) -> Any:
                 "Install with: pip install torch-directml"
             ) from exc
 
+        _patch_transformers_causal_mask_for_directml()
         dml_device = torch_directml.device(DIRECTML_DEVICE_ID)
         pipeline = pipeline.to(dml_device)
         _patch_scheduler_for_directml_float32(pipeline)
@@ -185,6 +247,105 @@ def _load_local_pipeline(model_source: str, use_directml: bool) -> Any:
     _LOCAL_PIPELINE_USE_DIRECTML = use_directml
     logger.info(f"Loaded local model source={model_source} backend={'directml' if use_directml else 'diffusers'}")
     return pipeline
+
+
+def _encode_prompt_chunks(pipeline: Any, prompt: str, *, target_chunk_count: int | None = None) -> tuple[Any, int]:
+    """Encode arbitrarily long prompt by chunking into CLIP-sized windows and concatenating embeddings."""
+    try:
+        import torch
+    except Exception as exc:
+        raise RuntimeError("Long prompt encoding requires torch") from exc
+
+    tokenizer = getattr(pipeline, "tokenizer", None)
+    text_encoder = getattr(pipeline, "text_encoder", None)
+    if tokenizer is None or text_encoder is None:
+        raise RuntimeError("Pipeline does not expose tokenizer/text_encoder for long prompt encoding")
+
+    max_length = int(getattr(tokenizer, "model_max_length", 77))
+    if max_length < 3:
+        raise RuntimeError(f"Invalid tokenizer model_max_length: {max_length}")
+
+    bos_token_id = tokenizer.bos_token_id if tokenizer.bos_token_id is not None else tokenizer.cls_token_id
+    eos_token_id = tokenizer.eos_token_id if tokenizer.eos_token_id is not None else tokenizer.sep_token_id
+    pad_token_id = tokenizer.pad_token_id if tokenizer.pad_token_id is not None else eos_token_id
+    if bos_token_id is None or eos_token_id is None or pad_token_id is None:
+        raise RuntimeError("Tokenizer is missing BOS/EOS/PAD token ids for long prompt encoding")
+
+    tokenized = tokenizer(
+        prompt,
+        add_special_tokens=False,
+        truncation=False,
+        return_attention_mask=False,
+    )
+    token_ids = list(tokenized["input_ids"])
+    payload_len = max_length - 2
+    chunks = [token_ids[idx : idx + payload_len] for idx in range(0, len(token_ids), payload_len)]
+    if not chunks:
+        chunks = [[]]
+
+    if target_chunk_count is not None and target_chunk_count > len(chunks):
+        chunks.extend([[] for _ in range(target_chunk_count - len(chunks))])
+
+    device = getattr(text_encoder, "device", None)
+    if device is None:
+        device = getattr(pipeline, "_execution_device", None) or getattr(pipeline, "device", "cpu")
+
+    encoded_chunks: list[Any] = []
+    for chunk in chunks:
+        ids = [bos_token_id] + chunk + [eos_token_id]
+        attention_mask_values = [1] * len(ids)
+        if len(ids) < max_length:
+            pad_count = max_length - len(ids)
+            ids.extend([pad_token_id] * pad_count)
+            attention_mask_values.extend([0] * pad_count)
+
+        input_ids = torch.tensor([ids], dtype=torch.long, device=device)
+        attention_mask = torch.tensor([attention_mask_values], dtype=torch.long, device=device)
+        with torch.no_grad():
+            chunk_embeds = text_encoder(input_ids, attention_mask=attention_mask)[0]
+        encoded_chunks.append(chunk_embeds)
+
+    prompt_embeds = torch.cat(encoded_chunks, dim=1)
+    return prompt_embeds, len(chunks)
+
+
+def _inject_long_prompt_embeddings(pipeline: Any, generation_kwargs: dict[str, Any]) -> None:
+    """Switch prompt input to prompt_embeds to support prompts longer than tokenizer max length."""
+    if not LOCAL_ENABLE_LONG_PROMPTS:
+        return
+    if "prompt" not in generation_kwargs or "prompt_embeds" in generation_kwargs:
+        return
+    if hasattr(pipeline, "text_encoder_2"):
+        # SDXL-like pipelines need additional pooled embeddings handling; keep default behavior.
+        return
+
+    prompt = str(generation_kwargs.get("prompt") or "")
+    if not prompt.strip():
+        return
+
+    try:
+        prompt_embeds, chunk_count = _encode_prompt_chunks(pipeline, prompt)
+        if chunk_count <= 1:
+            return
+
+        negative_prompt = str(generation_kwargs.get("negative_prompt") or "")
+        negative_prompt_embeds, _ = _encode_prompt_chunks(
+            pipeline,
+            negative_prompt,
+            target_chunk_count=chunk_count,
+        )
+
+        generation_kwargs.pop("prompt", None)
+        generation_kwargs.pop("negative_prompt", None)
+        generation_kwargs["prompt_embeds"] = prompt_embeds
+        if float(generation_kwargs.get("guidance_scale", 1.0)) > 1.0:
+            generation_kwargs["negative_prompt_embeds"] = negative_prompt_embeds
+
+        logger.info(
+            f"Long prompt enabled: encoded prompt in {chunk_count} CLIP chunks ({chunk_count * 77} token slots)"
+        )
+    except Exception as exc:
+        logger.warning(f"Long prompt embedding fallback failed; using default tokenizer truncation: {exc}")
 
 
 def _generate_image_openai(prompt: str) -> str:
@@ -218,6 +379,7 @@ def _generate_image_local(prompt: str) -> str:
         "width": LOCAL_IMAGE_WIDTH,
         "height": LOCAL_IMAGE_HEIGHT,
     }
+    _inject_long_prompt_embeddings(pipeline, generation_kwargs)
 
     if LOCAL_SEED >= 0 and not LOCAL_MODEL_USE_DIRECTML:
         try:
