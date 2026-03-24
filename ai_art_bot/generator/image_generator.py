@@ -19,6 +19,7 @@ LOCAL_IMAGE_WIDTH = int(os.getenv("LOCAL_IMAGE_WIDTH", str(WALLPAPER_WIDTH)))
 LOCAL_IMAGE_HEIGHT = int(os.getenv("LOCAL_IMAGE_HEIGHT", str(WALLPAPER_HEIGHT)))
 LOCAL_NUM_INFERENCE_STEPS = int(os.getenv("LOCAL_NUM_INFERENCE_STEPS", "24"))
 LOCAL_GUIDANCE_SCALE = float(os.getenv("LOCAL_GUIDANCE_SCALE", "7.0"))
+LOCAL_NEGATIVE_PROMPT = os.getenv("LOCAL_NEGATIVE_PROMPT", "").strip()
 LOCAL_SEED = int(os.getenv("LOCAL_SEED", "-1"))
 LOCAL_ENABLE_LONG_PROMPTS = (
     os.getenv("LOCAL_ENABLE_LONG_PROMPTS", "true").strip().lower() in {"1", "true", "yes"}
@@ -580,6 +581,8 @@ def _generate_image_local(prompt: str) -> str:
         "width": LOCAL_IMAGE_WIDTH,
         "height": LOCAL_IMAGE_HEIGHT,
     }
+    if LOCAL_NEGATIVE_PROMPT:
+        generation_kwargs["negative_prompt"] = LOCAL_NEGATIVE_PROMPT
     _inject_long_prompt_embeddings(pipeline, generation_kwargs)
 
     if LOCAL_SEED >= 0 and not LOCAL_MODEL_USE_DIRECTML:

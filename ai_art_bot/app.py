@@ -208,6 +208,13 @@ def _render_settings_editor(saved_settings: dict[str, str]) -> dict[str, str]:
                 value=saved_settings.get("LOCAL_GUIDANCE_SCALE", os.getenv("LOCAL_GUIDANCE_SCALE", "7.0")),
                 key="cfg_LOCAL_GUIDANCE_SCALE",
             )
+            settings_payload["LOCAL_NEGATIVE_PROMPT"] = st.text_area(
+                "LOCAL_NEGATIVE_PROMPT (optional)",
+                value=saved_settings.get("LOCAL_NEGATIVE_PROMPT", os.getenv("LOCAL_NEGATIVE_PROMPT", "")),
+                height=100,
+                key="cfg_LOCAL_NEGATIVE_PROMPT",
+                help="Used only for local_sd image generation.",
+            )
         with col2:
             settings_payload["LOCAL_SEED"] = st.text_input(
                 "LOCAL_SEED",
@@ -500,6 +507,13 @@ def _render_manual_prompt_panel(
 
         source_image_path = ""
         source_upscaled_path = ""
+        negative_prompt = st.text_area(
+            "Negative prompt (optional, local_sd only)",
+            value=(task_settings.get("LOCAL_NEGATIVE_PROMPT") or ""),
+            height=100,
+            key="manual_task_negative_prompt",
+            help="Overrides LOCAL_NEGATIVE_PROMPT for this queued task only.",
+        )
         if pipeline_mode in {"upscale_only", "upscale_upload", "upload_only"}:
             source_image_path = st.text_input("Source image path (needed for upscale/upload modes)")
         if pipeline_mode in {"upload_only"}:
@@ -524,11 +538,17 @@ def _render_manual_prompt_panel(
             if not manual_prompt.strip():
                 st.error("Prompt is required")
             else:
+                task_settings_payload = dict(task_settings)
+                if negative_prompt.strip():
+                    task_settings_payload["LOCAL_NEGATIVE_PROMPT"] = negative_prompt.strip()
+                else:
+                    task_settings_payload.pop("LOCAL_NEGATIVE_PROMPT", None)
+
                 task_id = runner.enqueue_manual_task(
                     prompt=manual_prompt,
                     prompt_mode=prompt_mode,
                     pipeline_mode=pipeline_mode,
-                    settings=task_settings,
+                    settings=task_settings_payload,
                     source_image_path=source_image_path or None,
                     source_upscaled_path=source_upscaled_path or None,
                 )
