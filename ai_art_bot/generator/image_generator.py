@@ -387,7 +387,7 @@ def _load_local_pipeline(model_source: str, use_directml: bool) -> Any:
 
     try:
         import torch
-        from diffusers import AutoPipelineForText2Image, DPMSolverMultistepScheduler
+        from diffusers import AutoPipelineForText2Image, EulerAncestralDiscreteScheduler
     except Exception as exc:
         raise RuntimeError(
             "Local SD generation requires `diffusers`, `transformers`, `accelerate`, and `safetensors`. "
@@ -405,7 +405,7 @@ def _load_local_pipeline(model_source: str, use_directml: bool) -> Any:
         use_safetensors=True,     # Use safetensors for faster, safer loading
         safety_checker=None,      # Remove unnecessary component
     )
-    pipeline.scheduler = DPMSolverMultistepScheduler.from_config(pipeline.scheduler.config)
+    pipeline.scheduler = EulerAncestralDiscreteScheduler.from_config(pipeline.scheduler.config)
 
     if use_directml:
         try:
