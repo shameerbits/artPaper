@@ -67,11 +67,6 @@ def _create_session(model_path: Path, provider: str):
         ) from exc
 
     available = ort.get_available_providers()
-    if provider == "OpenVINOExecutionProvider":
-        logger.warning(
-            "OpenVINO provider requested, but this build is DirectML-first. Using DmlExecutionProvider instead."
-        )
-        provider = "DmlExecutionProvider"
 
     if provider not in available:
         raise RuntimeError(
@@ -252,12 +247,3 @@ def _upscale_with_provider(image_path: str, provider: str, output_prefix: str) -
 
 def upscale_with_directml(image_path: str) -> str:
     return _upscale_with_provider(image_path, provider="DmlExecutionProvider", output_prefix="upscaled_directml")
-
-
-def upscale_with_openvino(image_path: str) -> str:
-    logger.warning("upscale_with_openvino is deprecated; using DirectML backend.")
-    return _upscale_with_provider(
-        image_path,
-        provider="DmlExecutionProvider",
-        output_prefix="upscaled_directml",
-    )

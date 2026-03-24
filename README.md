@@ -48,16 +48,21 @@ pip install -r requirements.txt
 ```bash
 export OPENAI_API_KEY="..."
 export IMAGE_BACKEND="openai"
-export LOCAL_MODEL_ID="runwayml/stable-diffusion-v1-5"
-export LOCAL_MODEL_PATH="./models/stable-diffusion-v1-5"
-export LOCAL_MODEL_USE_OPENVINO="false"
-export LOCAL_IMAGE_WIDTH="768"
-export LOCAL_IMAGE_HEIGHT="1344"
-export LOCAL_NUM_INFERENCE_STEPS="24"
-export LOCAL_GUIDANCE_SCALE="7.0"
+export LOCAL_MODEL_ID="Lykon/dreamshaper-8"
+export LOCAL_MODEL_PATH="./models/dreamshaper-8"
+export LOCAL_MODEL_USE_DIRECTML="false"
+export LOCAL_DIRECTML_PREFER_FLOAT32="true"
+export LOCAL_DIRECTML_FALLBACK_TO_CPU="true"
+export LOCAL_IMAGE_WIDTH="512"
+export LOCAL_IMAGE_HEIGHT="512"
+export LOCAL_NUM_INFERENCE_STEPS="35"
+export LOCAL_GUIDANCE_SCALE="8"
 export LOCAL_SAMPLER="euler_a"
-export LOCAL_NEGATIVE_PROMPT="blurry, low quality, text, watermark"
+export LOCAL_NEGATIVE_PROMPT="blurry, soft, low detail, repeated patterns, duplicate structures, distorted architecture, smudged, low resolution"
 export LOCAL_SEED="-1"
+export LOCAL_ENABLE_ATTENTION_SLICING="true"
+export LOCAL_ENABLE_VAE_TILING="true"
+export LOCAL_AUTO_MEMORY_OPTIMIZATION="true"
 export REPLICATE_API_TOKEN="..."
 export DEVIANTART_CLIENT_ID="..."
 export DEVIANTART_CLIENT_SECRET="..."
@@ -77,7 +82,6 @@ export ACCEL_ONNX_MODEL_URL=""
 export ACCEL_DEFAULT_MODEL_PATH="./weights/realesrgan_x4.onnx"
 export ACCEL_TILE="0"
 export ACCEL_TILE_PAD="8"
-export OPENVINO_DEVICE="GPU_FP32"
 export DIRECTML_DEVICE_ID="0"
 export RUN_INTERVAL_MINUTES="60"
 export CIVITAI_IMAGES_API="https://civitai.com/api/v1/images"
@@ -92,11 +96,11 @@ Notes:
 - You can bootstrap and cache DeviantArt tokens locally with `python app.py auth_deviantart` after setting only `DEVIANTART_CLIENT_ID` and `DEVIANTART_CLIENT_SECRET`.
 - Cached DeviantArt tokens are stored at `./data/deviantart_tokens.json` and are auto-updated when DeviantArt rotates `refresh_token`.
 - `DEVIANTART_PUBLISH=false` enables upload test mode (stash submit only, publish skipped).
-- `UPSCALER_BACKEND` supports `realesrgan` (default, local no-token upscaling), `realesrgan_local`, `replicate`, `directml`, and `openvino`.
+- `UPSCALER_BACKEND` supports `realesrgan` (default, local no-token upscaling), `realesrgan_local`, `replicate`, and `directml`.
 - `REALESRGAN_TILE` defaults to `256` and dramatically lowers peak RAM usage on CPU compared to full-frame (`0`) inference.
 - `REALESRGAN_MAX_INPUT_SIDE` and `REALESRGAN_MAX_INPUT_PIXELS` are optional safety limits to pre-downscale very large inputs before upscaling.
 - `REPLICATE_API_TOKEN` is only required when `UPSCALER_BACKEND=replicate`.
-- `ACCEL_ONNX_MODEL_PATH` (or `ACCEL_ONNX_MODEL_URL`) is required when `UPSCALER_BACKEND` is `directml` or `openvino`.
+- `ACCEL_ONNX_MODEL_PATH` (or `ACCEL_ONNX_MODEL_URL`) is required when `UPSCALER_BACKEND` is `directml`.
 - If `ACCEL_ONNX_MODEL_PATH` is empty, the app auto-uses `./weights/realesrgan_x4.onnx` when that file exists.
 - `ACCEL_DEFAULT_MODEL_PATH` can override this default local model location.
 - `ACCEL_TILE` can be enabled for accelerated backends to process very large images in chunks.
@@ -107,12 +111,12 @@ Local image generation options:
 
 - `IMAGE_BACKEND=openai` keeps current behavior (OpenAI image API).
 - `IMAGE_BACKEND=local_sd` enables local Stable Diffusion generation.
-- `LOCAL_MODEL_ID` is a Hugging Face model id (default: `runwayml/stable-diffusion-v1-5`).
+- `LOCAL_MODEL_ID` is a Hugging Face model id (default: `Lykon/dreamshaper-8`).
 - `LOCAL_MODEL_PATH` can point to a downloaded local model folder (overrides `LOCAL_MODEL_ID`).
-- `LOCAL_MODEL_USE_OPENVINO=true` enables OpenVINO backend for local SD generation.
-- `LOCAL_SAMPLER` selects local diffusion sampler: `euler_a` (default), `ddim`, or `dpm`.
+- `LOCAL_MODEL_USE_DIRECTML=true` enables DirectML backend for local SD generation.
+- `LOCAL_SAMPLER` selects local diffusion sampler: `euler_a`, `euler_ancestral`, `euler_ancestral_discrete`, `ddim`, `dpm`, `dpm_solver`, or `dpm_solver_multistep`.
 - `LOCAL_NEGATIVE_PROMPT` optionally adds a default negative prompt for local SD generation.
-- For Iris Xe, start with `LOCAL_IMAGE_WIDTH=768`, `LOCAL_IMAGE_HEIGHT=1344`, and `LOCAL_NUM_INFERENCE_STEPS=20-24`.
+- For Iris Xe, start with `LOCAL_IMAGE_WIDTH=512`, `LOCAL_IMAGE_HEIGHT=512`, and `LOCAL_NUM_INFERENCE_STEPS=30-35`.
 
 Install local Real-ESRGAN dependencies when using local backend:
 
@@ -125,9 +129,6 @@ Install accelerated backend dependencies (choose one path):
 ```bash
 # Windows + Intel/AMD/NVIDIA via DirectML
 pip install onnxruntime-directml
-
-# OpenVINO Execution Provider
-pip install onnxruntime-openvino
 ```
 
 Install optional local SD generation dependencies:
@@ -136,23 +137,11 @@ Install optional local SD generation dependencies:
 pip install diffusers transformers accelerate safetensors huggingface_hub
 ```
 
-Install optional OpenVINO local SD dependencies:
-
-```bash
-pip install "optimum-intel[openvino]"
-```
-
-## Local SD 1.5 quick start
+## Local SD quick start (DreamShaper 8)
 
 ### 1) Download a local model
 
-Default SD 1.5 model:
-
-```bash
-python app.py download_model --model-id runwayml/stable-diffusion-v1-5
-```
-
-You can also download popular SD 1.5 derivatives from Hugging Face (when available):
+Default DreamShaper model:
 
 ```bash
 python app.py download_model --model-id Lykon/dreamshaper-8
@@ -164,24 +153,25 @@ If you have a local model folder already, skip download and set `LOCAL_MODEL_PAT
 
 ```bash
 export IMAGE_BACKEND="local_sd"
-export LOCAL_MODEL_PATH="./models/stable-diffusion-v1-5"
+export LOCAL_MODEL_PATH="./models/dreamshaper-8"
 ```
 
 or use a model id directly:
 
 ```bash
 export IMAGE_BACKEND="local_sd"
-export LOCAL_MODEL_ID="runwayml/stable-diffusion-v1-5"
+export LOCAL_MODEL_ID="Lykon/dreamshaper-8"
 ```
 
-### 3) Enable OpenVINO for Intel Iris Xe (optional)
+### 3) Optional DirectML stability settings
 
 ```bash
-export LOCAL_MODEL_USE_OPENVINO="true"
-export OPENVINO_DEVICE="GPU"
-export LOCAL_IMAGE_WIDTH="768"
-export LOCAL_IMAGE_HEIGHT="1344"
-export LOCAL_NUM_INFERENCE_STEPS="20"
+export LOCAL_MODEL_USE_DIRECTML="false"
+export LOCAL_DIRECTML_PREFER_FLOAT32="true"
+export LOCAL_DIRECTML_FALLBACK_TO_CPU="true"
+export LOCAL_ENABLE_ATTENTION_SLICING="true"
+export LOCAL_ENABLE_VAE_TILING="true"
+export LOCAL_AUTO_MEMORY_OPTIMIZATION="true"
 ```
 
 ### 4) Generate using local model
@@ -190,7 +180,7 @@ export LOCAL_NUM_INFERENCE_STEPS="20"
 python app.py generate_only
 ```
 
-## Recommended SD 1.5 family models
+## Recommended SD family models
 
 - Photorealism: EpicRealism, Juggernaut Aftermath.
 - Best all-arounder: DreamShaper 8.
@@ -204,7 +194,7 @@ If a model is hosted on CivitAI as a single `.safetensors` file, convert/export 
 python app.py run_once
 python app.py run_loop --interval 90
 python app.py generate_only
-python app.py download_model --model-id runwayml/stable-diffusion-v1-5
+python app.py download_model --model-id Lykon/dreamshaper-8
 python app.py auth_deviantart
 python app.py serve --host 0.0.0.0 --port 8000
 streamlit run app.py

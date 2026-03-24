@@ -176,23 +176,23 @@ def _render_settings_editor(saved_settings: dict[str, str]) -> dict[str, str]:
         with col1:
             settings_payload["LOCAL_MODEL_ID"] = st.text_input(
                 "LOCAL_MODEL_ID",
-                value=saved_settings.get("LOCAL_MODEL_ID", os.getenv("LOCAL_MODEL_ID", "runwayml/stable-diffusion-v1-5")),
+                value=saved_settings.get("LOCAL_MODEL_ID", os.getenv("LOCAL_MODEL_ID", "Lykon/dreamshaper-8")),
                 key="cfg_LOCAL_MODEL_ID",
             )
             settings_payload["LOCAL_MODEL_PATH"] = st.text_input(
                 "LOCAL_MODEL_PATH (optional)",
-                value=saved_settings.get("LOCAL_MODEL_PATH", os.getenv("LOCAL_MODEL_PATH", "./models/stable-diffusion-v1-5")),
+                value=saved_settings.get("LOCAL_MODEL_PATH", os.getenv("LOCAL_MODEL_PATH", "./models/dreamshaper-8")),
                 key="cfg_LOCAL_MODEL_PATH",
             )
         with col2:
             settings_payload["LOCAL_IMAGE_WIDTH"] = st.number_input(
                 "LOCAL_IMAGE_WIDTH",
-                value=int(saved_settings.get("LOCAL_IMAGE_WIDTH", os.getenv("LOCAL_IMAGE_WIDTH", "768"))),
+                value=int(saved_settings.get("LOCAL_IMAGE_WIDTH", os.getenv("LOCAL_IMAGE_WIDTH", "512"))),
                 key="cfg_LOCAL_IMAGE_WIDTH",
             )
             settings_payload["LOCAL_IMAGE_HEIGHT"] = st.number_input(
                 "LOCAL_IMAGE_HEIGHT",
-                value=int(saved_settings.get("LOCAL_IMAGE_HEIGHT", os.getenv("LOCAL_IMAGE_HEIGHT", "1344"))),
+                value=int(saved_settings.get("LOCAL_IMAGE_HEIGHT", os.getenv("LOCAL_IMAGE_HEIGHT", "512"))),
                 key="cfg_LOCAL_IMAGE_HEIGHT",
             )
 
@@ -200,15 +200,23 @@ def _render_settings_editor(saved_settings: dict[str, str]) -> dict[str, str]:
         with col1:
             settings_payload["LOCAL_NUM_INFERENCE_STEPS"] = st.number_input(
                 "LOCAL_NUM_INFERENCE_STEPS",
-                value=int(saved_settings.get("LOCAL_NUM_INFERENCE_STEPS", os.getenv("LOCAL_NUM_INFERENCE_STEPS", "24"))),
+                value=int(saved_settings.get("LOCAL_NUM_INFERENCE_STEPS", os.getenv("LOCAL_NUM_INFERENCE_STEPS", "35"))),
                 key="cfg_LOCAL_NUM_INFERENCE_STEPS",
             )
             settings_payload["LOCAL_GUIDANCE_SCALE"] = st.text_input(
                 "LOCAL_GUIDANCE_SCALE",
-                value=saved_settings.get("LOCAL_GUIDANCE_SCALE", os.getenv("LOCAL_GUIDANCE_SCALE", "7.0")),
+                value=saved_settings.get("LOCAL_GUIDANCE_SCALE", os.getenv("LOCAL_GUIDANCE_SCALE", "8")),
                 key="cfg_LOCAL_GUIDANCE_SCALE",
             )
-            sampler_options = ["euler_a", "ddim", "dpm"]
+            sampler_options = [
+                "euler_a",
+                "euler_ancestral",
+                "euler_ancestral_discrete",
+                "ddim",
+                "dpm",
+                "dpm_solver",
+                "dpm_solver_multistep",
+            ]
             sampler_default = saved_settings.get("LOCAL_SAMPLER", os.getenv("LOCAL_SAMPLER", "euler_a")).strip().lower()
             settings_payload["LOCAL_SAMPLER"] = st.selectbox(
                 "LOCAL_SAMPLER",
@@ -218,7 +226,13 @@ def _render_settings_editor(saved_settings: dict[str, str]) -> dict[str, str]:
             )
             settings_payload["LOCAL_NEGATIVE_PROMPT"] = st.text_area(
                 "LOCAL_NEGATIVE_PROMPT (optional)",
-                value=saved_settings.get("LOCAL_NEGATIVE_PROMPT", os.getenv("LOCAL_NEGATIVE_PROMPT", "")),
+                value=saved_settings.get(
+                    "LOCAL_NEGATIVE_PROMPT",
+                    os.getenv(
+                        "LOCAL_NEGATIVE_PROMPT",
+                        "blurry, soft, low detail, repeated patterns, duplicate structures, distorted architecture, smudged, low resolution",
+                    ),
+                ),
                 height=100,
                 key="cfg_LOCAL_NEGATIVE_PROMPT",
                 help="Used only for local_sd image generation.",
@@ -233,20 +247,75 @@ def _render_settings_editor(saved_settings: dict[str, str]) -> dict[str, str]:
                 "LOCAL_MODEL_USE_DIRECTML",
                 options=["false", "true"],
                 index=1
-                if saved_settings.get(
-                    "LOCAL_MODEL_USE_DIRECTML",
-                    saved_settings.get("LOCAL_MODEL_USE_OPENVINO", "false"),
-                ).lower()
+                if saved_settings.get("LOCAL_MODEL_USE_DIRECTML", os.getenv("LOCAL_MODEL_USE_DIRECTML", "false")).lower()
                 == "true"
                 else 0,
                 key="cfg_LOCAL_MODEL_USE_DIRECTML",
+            )
+            settings_payload["LOCAL_DIRECTML_PREFER_FLOAT32"] = st.selectbox(
+                "LOCAL_DIRECTML_PREFER_FLOAT32",
+                options=["true", "false"],
+                index=0
+                if saved_settings.get(
+                    "LOCAL_DIRECTML_PREFER_FLOAT32",
+                    os.getenv("LOCAL_DIRECTML_PREFER_FLOAT32", "true"),
+                ).lower()
+                == "true"
+                else 1,
+                key="cfg_LOCAL_DIRECTML_PREFER_FLOAT32",
+            )
+            settings_payload["LOCAL_DIRECTML_FALLBACK_TO_CPU"] = st.selectbox(
+                "LOCAL_DIRECTML_FALLBACK_TO_CPU",
+                options=["true", "false"],
+                index=0
+                if saved_settings.get(
+                    "LOCAL_DIRECTML_FALLBACK_TO_CPU",
+                    os.getenv("LOCAL_DIRECTML_FALLBACK_TO_CPU", "true"),
+                ).lower()
+                == "true"
+                else 1,
+                key="cfg_LOCAL_DIRECTML_FALLBACK_TO_CPU",
+            )
+            settings_payload["LOCAL_ENABLE_ATTENTION_SLICING"] = st.selectbox(
+                "LOCAL_ENABLE_ATTENTION_SLICING",
+                options=["true", "false"],
+                index=0
+                if saved_settings.get(
+                    "LOCAL_ENABLE_ATTENTION_SLICING",
+                    os.getenv("LOCAL_ENABLE_ATTENTION_SLICING", "true"),
+                ).lower()
+                == "true"
+                else 1,
+                key="cfg_LOCAL_ENABLE_ATTENTION_SLICING",
+            )
+            settings_payload["LOCAL_ENABLE_VAE_TILING"] = st.selectbox(
+                "LOCAL_ENABLE_VAE_TILING",
+                options=["true", "false"],
+                index=0
+                if saved_settings.get(
+                    "LOCAL_ENABLE_VAE_TILING",
+                    os.getenv("LOCAL_ENABLE_VAE_TILING", "true"),
+                ).lower()
+                == "true"
+                else 1,
+                key="cfg_LOCAL_ENABLE_VAE_TILING",
+            )
+            settings_payload["LOCAL_AUTO_MEMORY_OPTIMIZATION"] = st.selectbox(
+                "LOCAL_AUTO_MEMORY_OPTIMIZATION",
+                options=["true", "false"],
+                index=0
+                if saved_settings.get(
+                    "LOCAL_AUTO_MEMORY_OPTIMIZATION",
+                    os.getenv("LOCAL_AUTO_MEMORY_OPTIMIZATION", "true"),
+                ).lower()
+                == "true"
+                else 1,
+                key="cfg_LOCAL_AUTO_MEMORY_OPTIMIZATION",
             )
 
     # Upscaler Backend Selection
     st.markdown("##### Upscaler Backend")
     upscaler_default = saved_settings.get("UPSCALER_BACKEND", os.getenv("UPSCALER_BACKEND", "realesrgan")).lower()
-    if upscaler_default == "openvino":
-        upscaler_default = "directml"
     upscaler_options = ["realesrgan", "replicate", "directml"]
     upscaler_backend = st.selectbox(
         "UPSCALER_BACKEND",
@@ -686,7 +755,7 @@ def main() -> None:
     )
     parser.add_argument(
         "--model-id",
-        default=os.getenv("LOCAL_MODEL_ID", "runwayml/stable-diffusion-v1-5"),
+        default=os.getenv("LOCAL_MODEL_ID", "Lykon/dreamshaper-8"),
         help="Model id for local SD download (used with download_model)",
     )
     parser.add_argument(

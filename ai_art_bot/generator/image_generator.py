@@ -29,7 +29,7 @@ LOCAL_DIRECTML_FALLBACK_TO_CPU = (
     os.getenv("LOCAL_DIRECTML_FALLBACK_TO_CPU", "true").strip().lower() in {"1", "true", "yes"}
 )
 LOCAL_MODEL_USE_DIRECTML = (
-    os.getenv("LOCAL_MODEL_USE_DIRECTML", os.getenv("LOCAL_MODEL_USE_OPENVINO", "false"))
+    os.getenv("LOCAL_MODEL_USE_DIRECTML", "false")
     .strip()
     .lower()
     in {"1", "true", "yes"}

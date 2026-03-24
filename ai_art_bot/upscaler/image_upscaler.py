@@ -211,9 +211,6 @@ def upscale_image(image_path: str) -> str:
         return _upscale_with_replicate(image_path)
     if UPSCALER_BACKEND == "directml":
         return upscale_with_directml(image_path)
-    if UPSCALER_BACKEND == "openvino":
-        logger.warning("UPSCALER_BACKEND=openvino is deprecated; using directml backend")
-        return upscale_with_directml(image_path)
     raise RuntimeError(
         "Unsupported UPSCALER_BACKEND "
         f"'{UPSCALER_BACKEND}'. Use 'realesrgan', 'realesrgan_local', 'replicate', or 'directml'."

@@ -243,7 +243,7 @@ Relative to Baseline (float32, safety_checker enabled):
 Loading model with dtype=<class 'torch.float16'>
 Enabled xformers memory-efficient attention (~20% faster, ~10% less memory)
 Enabled model CPU offloading (40-50% VRAM reduction, ~10-15% slower)
-Loaded local model source=runwayml/stable-diffusion-v1-5 backend=cuda dtype=<class 'torch.float16'>
+Loaded local model source=Lykon/dreamshaper-8 backend=cuda dtype=<class 'torch.float16'>
 ```
 
 ### DirectML with Attention Slicing
@@ -251,7 +251,7 @@ Loaded local model source=runwayml/stable-diffusion-v1-5 backend=cuda dtype=<cla
 Loading model with dtype=<class 'torch.float16'>
 Enabled xformers memory-efficient attention (~20% faster, ~10% less memory)
 Enabled attention slicing (memory-optimized, ~20% slower)
-Loaded local model source=runwayml/stable-diffusion-v1-5 backend=directml dtype=<class 'torch.float16'>
+Loaded local model source=Lykon/dreamshaper-8 backend=directml dtype=<class 'torch.float16'>
 ```
 
 ## Migration Notes

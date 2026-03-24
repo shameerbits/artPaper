@@ -10,7 +10,7 @@ GENERATED_DIR = DATA_DIR / "generated"
 UPSCALED_DIR = DATA_DIR / "upscaled"
 MODELS_DIR = BASE_DIR / "models"
 WEIGHTS_DIR = BASE_DIR / "weights"
-LOCAL_DEFAULT_MODEL_PATH = MODELS_DIR / "stable-diffusion-v1-5"
+LOCAL_DEFAULT_MODEL_PATH = MODELS_DIR / "dreamshaper-8"
 ACCEL_DEFAULT_ONNX_MODEL_PATH = WEIGHTS_DIR / "realesrgan_x4.onnx"
 PROMPTS_FILE = BASE_DIR / "prompts.txt"
 DB_PATH = DATA_DIR / "images.db"
@@ -22,7 +22,8 @@ WEB_CONFIG_KEYS = [
     "LOCAL_MODEL_ID",
     "LOCAL_MODEL_PATH",
     "LOCAL_MODEL_USE_DIRECTML",
-    "LOCAL_MODEL_USE_OPENVINO",
+    "LOCAL_DIRECTML_PREFER_FLOAT32",
+    "LOCAL_DIRECTML_FALLBACK_TO_CPU",
     "LOCAL_IMAGE_WIDTH",
     "LOCAL_IMAGE_HEIGHT",
     "LOCAL_NUM_INFERENCE_STEPS",
@@ -147,7 +148,7 @@ def get_settings() -> Settings:
     return Settings(
         image_backend=os.getenv("IMAGE_BACKEND", "openai"),
         openai_api_key=os.getenv("OPENAI_API_KEY", ""),
-        local_model_id=os.getenv("LOCAL_MODEL_ID", "runwayml/stable-diffusion-v1-5"),
+        local_model_id=os.getenv("LOCAL_MODEL_ID", "Lykon/dreamshaper-8"),
         local_model_path=os.getenv("LOCAL_MODEL_PATH", str(LOCAL_DEFAULT_MODEL_PATH)),
         replicate_api_token=os.getenv("REPLICATE_API_TOKEN", ""),
         deviantart_client_id=os.getenv("DEVIANTART_CLIENT_ID", ""),
