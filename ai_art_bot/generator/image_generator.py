@@ -32,6 +32,15 @@ LOCAL_MODEL_USE_DIRECTML = (
     .lower()
     in {"1", "true", "yes"}
 )
+LOCAL_ENABLE_ATTENTION_SLICING = (
+    os.getenv("LOCAL_ENABLE_ATTENTION_SLICING", "false").strip().lower() in {"1", "true", "yes"}
+)
+LOCAL_ENABLE_VAE_TILING = (
+    os.getenv("LOCAL_ENABLE_VAE_TILING", "false").strip().lower() in {"1", "true", "yes"}
+)
+LOCAL_AUTO_MEMORY_OPTIMIZATION = (
+    os.getenv("LOCAL_AUTO_MEMORY_OPTIMIZATION", "false").strip().lower() in {"1", "true", "yes"}
+)
 DIRECTML_DEVICE_ID = max(int(os.getenv("DIRECTML_DEVICE_ID", "0")), 0)
 
 _LOCAL_PIPELINE: Any | None = None
@@ -151,6 +160,69 @@ def _patch_scheduler_for_directml_float32(pipeline: Any) -> None:
     setattr(scheduler, "_dml_float32_patched", True)
 
 
+def _get_available_vram() -> int | None:
+    """Estimate available VRAM in MB. Returns None if unable to detect."""
+    try:
+        import torch
+        if torch.cuda.is_available():
+            return torch.cuda.get_device_properties(0).total_memory // (1024 ** 2)
+    except Exception:
+        pass
+
+    if LOCAL_MODEL_USE_DIRECTML:
+        try:
+            import torch_directml
+            # DirectML doesn't expose VRAM directly; assume Conservative estimate for guidance.
+            return 2048  # Conservative fallback
+        except Exception:
+            pass
+
+    return None
+
+
+def _apply_memory_optimizations(pipeline: Any, enable_attention_slicing: bool = False, 
+                                 enable_vae_tiling: bool = False, auto_optimize: bool = False) -> None:
+    """Apply memory optimization techniques to reduce pipeline VRAM usage.
+    
+    Args:
+        pipeline: The diffusers pipeline to optimize
+        enable_attention_slicing: Slice attention computation (reduces memory ~20%, slower ~20%)
+        enable_vae_tiling: Process VAE in tiles (reduces memory ~15%, slower ~5-10%)
+        auto_optimize: Automatically enable both if VRAM < 4GB
+    """
+    should_optimize = enable_attention_slicing or enable_vae_tiling or auto_optimize
+    if not should_optimize:
+        return
+
+    available_vram = None
+    if auto_optimize:
+        available_vram = _get_available_vram()
+        if available_vram is not None and available_vram >= 4096:
+            # Sufficient VRAM, skip optimizations
+            logger.info(f"Auto memory optimization skipped: available VRAM {available_vram}MB >= 4GB threshold")
+            return
+        if available_vram is not None:
+            logger.info(f"Auto memory optimization enabled: available VRAM {available_vram}MB < 4GB")
+        enable_attention_slicing = True
+        enable_vae_tiling = True
+
+    # Enable attention slicing for memory savings
+    if enable_attention_slicing:
+        try:
+            pipeline.enable_attention_slicing()
+            logger.info("Enabled attention slicing (memory-optimized, ~20% slower)")
+        except Exception as exc:
+            logger.warning(f"Failed to enable attention slicing: {exc}")
+
+    # Enable VAE tiling to process decode/encode in chunks
+    if enable_vae_tiling:
+        try:
+            pipeline.enable_vae_tiling()
+            logger.info("Enabled VAE tiling (memory-optimized, ~5-10% slower)")
+        except Exception as exc:
+            logger.warning(f"Failed to enable VAE tiling: {exc}")
+
+
 def _to_mobile_wallpaper(image_bytes: bytes, width: int = WALLPAPER_WIDTH, height: int = WALLPAPER_HEIGHT) -> bytes:
     """Center-crop and resize to an exact mobile wallpaper aspect ratio (default 9:16)."""
     target_ratio = width / height
@@ -241,6 +313,14 @@ def _load_local_pipeline(model_source: str, use_directml: bool) -> Any:
         _patch_scheduler_for_directml_float32(pipeline)
     else:
         pipeline = pipeline.to("cpu")
+
+    # Apply memory optimizations (before storing in global)
+    _apply_memory_optimizations(
+        pipeline,
+        enable_attention_slicing=LOCAL_ENABLE_ATTENTION_SLICING,
+        enable_vae_tiling=LOCAL_ENABLE_VAE_TILING,
+        auto_optimize=LOCAL_AUTO_MEMORY_OPTIMIZATION,
+    )
 
     _LOCAL_PIPELINE = pipeline
     _LOCAL_PIPELINE_SOURCE = model_source
