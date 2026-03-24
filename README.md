@@ -55,6 +55,7 @@ export LOCAL_IMAGE_WIDTH="768"
 export LOCAL_IMAGE_HEIGHT="1344"
 export LOCAL_NUM_INFERENCE_STEPS="24"
 export LOCAL_GUIDANCE_SCALE="7.0"
+export LOCAL_SAMPLER="euler_a"
 export LOCAL_NEGATIVE_PROMPT="blurry, low quality, text, watermark"
 export LOCAL_SEED="-1"
 export REPLICATE_API_TOKEN="..."
@@ -109,6 +110,7 @@ Local image generation options:
 - `LOCAL_MODEL_ID` is a Hugging Face model id (default: `runwayml/stable-diffusion-v1-5`).
 - `LOCAL_MODEL_PATH` can point to a downloaded local model folder (overrides `LOCAL_MODEL_ID`).
 - `LOCAL_MODEL_USE_OPENVINO=true` enables OpenVINO backend for local SD generation.
+- `LOCAL_SAMPLER` selects local diffusion sampler: `euler_a` (default), `ddim`, or `dpm`.
 - `LOCAL_NEGATIVE_PROMPT` optionally adds a default negative prompt for local SD generation.
 - For Iris Xe, start with `LOCAL_IMAGE_WIDTH=768`, `LOCAL_IMAGE_HEIGHT=1344`, and `LOCAL_NUM_INFERENCE_STEPS=20-24`.
 

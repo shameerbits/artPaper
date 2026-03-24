@@ -208,6 +208,14 @@ def _render_settings_editor(saved_settings: dict[str, str]) -> dict[str, str]:
                 value=saved_settings.get("LOCAL_GUIDANCE_SCALE", os.getenv("LOCAL_GUIDANCE_SCALE", "7.0")),
                 key="cfg_LOCAL_GUIDANCE_SCALE",
             )
+            sampler_options = ["euler_a", "ddim", "dpm"]
+            sampler_default = saved_settings.get("LOCAL_SAMPLER", os.getenv("LOCAL_SAMPLER", "euler_a")).strip().lower()
+            settings_payload["LOCAL_SAMPLER"] = st.selectbox(
+                "LOCAL_SAMPLER",
+                options=sampler_options,
+                index=sampler_options.index(sampler_default) if sampler_default in sampler_options else 0,
+                key="cfg_LOCAL_SAMPLER",
+            )
             settings_payload["LOCAL_NEGATIVE_PROMPT"] = st.text_area(
                 "LOCAL_NEGATIVE_PROMPT (optional)",
                 value=saved_settings.get("LOCAL_NEGATIVE_PROMPT", os.getenv("LOCAL_NEGATIVE_PROMPT", "")),

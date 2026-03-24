@@ -19,6 +19,7 @@ LOCAL_IMAGE_WIDTH = int(os.getenv("LOCAL_IMAGE_WIDTH", str(WALLPAPER_WIDTH)))
 LOCAL_IMAGE_HEIGHT = int(os.getenv("LOCAL_IMAGE_HEIGHT", str(WALLPAPER_HEIGHT)))
 LOCAL_NUM_INFERENCE_STEPS = int(os.getenv("LOCAL_NUM_INFERENCE_STEPS", "24"))
 LOCAL_GUIDANCE_SCALE = float(os.getenv("LOCAL_GUIDANCE_SCALE", "7.0"))
+LOCAL_SAMPLER = os.getenv("LOCAL_SAMPLER", "euler_a").strip().lower()
 LOCAL_NEGATIVE_PROMPT = os.getenv("LOCAL_NEGATIVE_PROMPT", "").strip()
 LOCAL_SEED = int(os.getenv("LOCAL_SEED", "-1"))
 LOCAL_ENABLE_LONG_PROMPTS = (
@@ -388,7 +389,12 @@ def _load_local_pipeline(model_source: str, use_directml: bool) -> Any:
 
     try:
         import torch
-        from diffusers import AutoPipelineForText2Image, EulerAncestralDiscreteScheduler
+        from diffusers import (
+            AutoPipelineForText2Image,
+            DDIMScheduler,
+            DPMSolverMultistepScheduler,
+            EulerAncestralDiscreteScheduler,
+        )
     except Exception as exc:
         raise RuntimeError(
             "Local SD generation requires `diffusers`, `transformers`, `accelerate`, and `safetensors`. "
@@ -406,7 +412,26 @@ def _load_local_pipeline(model_source: str, use_directml: bool) -> Any:
         use_safetensors=True,     # Use safetensors for faster, safer loading
         safety_checker=None,      # Remove unnecessary component
     )
-    pipeline.scheduler = EulerAncestralDiscreteScheduler.from_config(pipeline.scheduler.config)
+    sampler_aliases = {
+        "euler_a": "euler_a",
+        "euler_ancestral": "euler_a",
+        "euler_ancestral_discrete": "euler_a",
+        "ddim": "ddim",
+        "dpm": "dpm",
+        "dpm_solver": "dpm",
+        "dpm_solver_multistep": "dpm",
+    }
+    scheduler_key = sampler_aliases.get(LOCAL_SAMPLER, "euler_a")
+    scheduler_map = {
+        "euler_a": EulerAncestralDiscreteScheduler,
+        "ddim": DDIMScheduler,
+        "dpm": DPMSolverMultistepScheduler,
+    }
+    scheduler_class = scheduler_map[scheduler_key]
+    pipeline.scheduler = scheduler_class.from_config(pipeline.scheduler.config)
+    logger.info(
+        f"Using local SD sampler: requested='{LOCAL_SAMPLER}' resolved='{scheduler_key}' class={scheduler_class.__name__}"
+    )
 
     if use_directml:
         try:
