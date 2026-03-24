@@ -48,6 +48,14 @@ _LOCAL_PIPELINE_SOURCE: str | None = None
 _LOCAL_PIPELINE_USE_DIRECTML: bool | None = None
 _DIRECTML_CAUSAL_MASK_PATCHED = False
 
+_XFORMERS_AVAILABLE = False
+try:
+    import xformers
+    _XFORMERS_AVAILABLE = True
+except ImportError:
+    _XFORMERS_AVAILABLE = False
+
+
 
 def _patch_transformers_causal_mask_for_directml() -> None:
     """Patch Transformers causal mask creation to avoid Float64 ops on DirectML backends."""
@@ -222,6 +230,83 @@ def _apply_memory_optimizations(pipeline: Any, enable_attention_slicing: bool = 
         except Exception as exc:
             logger.warning(f"Failed to enable VAE tiling: {exc}")
 
+    # Try to enable xformers optimizations (independent of memory state)
+    _enable_xformers_memory_efficient_attention(pipeline)
+
+
+
+
+
+def _get_available_vram() -> int | None:
+    """Estimate available VRAM in MB. Returns None if unable to detect."""
+    try:
+        import torch
+        if torch.cuda.is_available():
+            return torch.cuda.get_device_properties(0).total_memory // (1024 ** 2)
+    except Exception:
+        pass
+
+    if LOCAL_MODEL_USE_DIRECTML:
+        try:
+            import torch_directml
+            # DirectML doesn't expose VRAM directly; assume conservative estimate for guidance.
+            return 2048  # Conservative fallback
+        except Exception:
+            pass
+
+    return None
+
+
+def _get_optimal_dtype(use_directml: bool) -> Any:
+    """Determine optimal tensor dtype based on hardware capabilities.
+    
+    Returns float16 for memory efficiency on CUDA/DirectML, 
+    but may fall back to float32 if needed.
+    """
+    try:
+        import torch
+        # Use float16 on GPU backends for 2x memory efficiency
+        # DirectML supports float16 operations (unlike float64)
+        if use_directml or torch.cuda.is_available():
+            return torch.float16
+        return torch.float32
+    except Exception:
+        return None
+
+
+def _enable_xformers_memory_efficient_attention(pipeline: Any) -> bool:
+    """Enable xformers memory-efficient attention if available.
+    
+    xformers provides ~20% speedup and ~10% memory savings via optimized attention kernels.
+    Returns True if successfully enabled, False otherwise.
+    """
+    if not _XFORMERS_AVAILABLE:
+        return False
+    
+    try:
+        pipeline.enable_xformers_memory_efficient_attention()
+        logger.info("Enabled xformers memory-efficient attention (~20% faster, ~10% less memory)")
+        return True
+    except Exception as exc:
+        logger.debug(f"Could not enable xformers attention: {exc}")
+        return False
+
+
+def _enable_model_cpu_offload(pipeline: Any) -> bool:
+    """Enable CPU offloading to reduce peak VRAM usage.
+    
+    Components are moved to CPU and only brought to GPU when needed, reducing max VRAM.
+    Tradeoff: ~10-15% slower execution but ~40-50% VRAM reduction.
+    Returns True if successfully enabled, False otherwise.
+    """
+    try:
+        pipeline.enable_model_cpu_offload()
+        logger.info("Enabled model CPU offloading (40-50% VRAM reduction, ~10-15% slower)")
+        return True
+    except Exception as exc:
+        logger.debug(f"Could not enable model CPU offload: {exc}")
+        return False
+
 
 def _to_mobile_wallpaper(image_bytes: bytes, width: int = WALLPAPER_WIDTH, height: int = WALLPAPER_HEIGHT) -> bytes:
     """Center-crop and resize to an exact mobile wallpaper aspect ratio (default 9:16)."""
@@ -291,10 +376,16 @@ def _load_local_pipeline(model_source: str, use_directml: bool) -> Any:
             "Install optional local generation dependencies first."
         ) from exc
 
+    optimal_dtype = _get_optimal_dtype(use_directml)
+    logger.info(f"Loading model with dtype={optimal_dtype}")
+
+    # Load pipeline with memory optimizations
     pipeline = AutoPipelineForText2Image.from_pretrained(
         model_source,
-        torch_dtype=torch.float32,
-        safety_checker=None,
+        torch_dtype=optimal_dtype or torch.float32,
+        low_cpu_mem_usage=True,  # Avoid duplicate weights during loading
+        use_safetensors=True,     # Use safetensors for faster, safer loading
+        safety_checker=None,      # Remove unnecessary component
     )
     pipeline.scheduler = DPMSolverMultistepScheduler.from_config(pipeline.scheduler.config)
 
@@ -314,6 +405,14 @@ def _load_local_pipeline(model_source: str, use_directml: bool) -> Any:
     else:
         pipeline = pipeline.to("cpu")
 
+    # Enable xformers memory-efficient attention (if available, independent of device)
+    _enable_xformers_memory_efficient_attention(pipeline)
+
+    # Enable model CPU offloading for CUDA backend (reduces peak memory by 40-50%)
+    # Note: Disable on DirectML due to compatibility; use attention slicing instead
+    if not use_directml and _XFORMERS_AVAILABLE:
+        _enable_model_cpu_offload(pipeline)
+
     # Apply memory optimizations (before storing in global)
     _apply_memory_optimizations(
         pipeline,
@@ -325,7 +424,11 @@ def _load_local_pipeline(model_source: str, use_directml: bool) -> Any:
     _LOCAL_PIPELINE = pipeline
     _LOCAL_PIPELINE_SOURCE = model_source
     _LOCAL_PIPELINE_USE_DIRECTML = use_directml
-    logger.info(f"Loaded local model source={model_source} backend={'directml' if use_directml else 'diffusers'}")
+    logger.info(
+        f"Loaded local model source={model_source} "
+        f"backend={'directml' if use_directml else 'cuda' if torch.cuda.is_available() else 'cpu'} "
+        f"dtype={optimal_dtype or torch.float32}"
+    )
     return pipeline
 
 
@@ -471,31 +574,22 @@ def _generate_image_local(prompt: str) -> str:
     elif LOCAL_SEED >= 0 and LOCAL_MODEL_USE_DIRECTML:
         logger.warning("LOCAL_SEED is ignored for DirectML local generation on this backend")
 
-    if LOCAL_MODEL_USE_DIRECTML:
-        try:
-            import torch
-
-            default_dtype = torch.get_default_dtype()
-            torch.set_default_dtype(torch.float32)
-            try:
-                result = pipeline(**generation_kwargs)
-            finally:
-                torch.set_default_dtype(default_dtype)
-        except Exception as exc:
-            error_text = str(exc)
-            if (
-                LOCAL_DIRECTML_FALLBACK_TO_CPU
-                and "does not support Double (Float64) operations" in error_text
-            ):
-                logger.warning(
-                    "DirectML failed due to Float64 limitation. Falling back to CPU generation for this run."
-                )
-                cpu_pipeline = _load_local_pipeline(model_source=model_source, use_directml=False)
-                result = cpu_pipeline(**generation_kwargs)
-            else:
-                raise
-    else:
+    # Generate image with float16 model (native support on DirectML/CUDA)
+    try:
         result = pipeline(**generation_kwargs)
+    except Exception as exc:
+        error_text = str(exc)
+        if (
+            LOCAL_DIRECTML_FALLBACK_TO_CPU
+            and "does not support Double (Float64) operations" in error_text
+        ):
+            logger.warning(
+                "DirectML failed due to Float64 limitation. Falling back to CPU generation for this run."
+            )
+            cpu_pipeline = _load_local_pipeline(model_source=model_source, use_directml=False)
+            result = cpu_pipeline(**generation_kwargs)
+        else:
+            raise
 
     image = result.images[0]
     return _save_image_as_wallpaper(image)
