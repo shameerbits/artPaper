@@ -41,6 +41,9 @@ LOCAL_ENABLE_VAE_TILING = (
 LOCAL_AUTO_MEMORY_OPTIMIZATION = (
     os.getenv("LOCAL_AUTO_MEMORY_OPTIMIZATION", "false").strip().lower() in {"1", "true", "yes"}
 )
+LOCAL_DIRECTML_PREFER_FLOAT32 = (
+    os.getenv("LOCAL_DIRECTML_PREFER_FLOAT32", "true").strip().lower() in {"1", "true", "yes"}
+)
 DIRECTML_DEVICE_ID = max(int(os.getenv("DIRECTML_DEVICE_ID", "0")), 0)
 
 _LOCAL_PIPELINE: Any | None = None
@@ -265,13 +268,28 @@ def _get_optimal_dtype(use_directml: bool) -> Any:
     """
     try:
         import torch
-        # Use float16 on GPU backends for 2x memory efficiency
-        # DirectML supports float16 operations (unlike float64)
-        if use_directml or torch.cuda.is_available():
+        # DirectML can run float16, but many Windows drivers are more stable with float32.
+        if use_directml:
+            return torch.float32 if LOCAL_DIRECTML_PREFER_FLOAT32 else torch.float16
+        if torch.cuda.is_available():
             return torch.float16
         return torch.float32
     except Exception:
         return None
+
+
+def _should_fallback_from_directml(error_text: str) -> bool:
+    lowered = error_text.lower()
+    fallback_markers = (
+        "does not support double (float64) operations",
+        "gpu device instance has been suspended",
+        "getdeviceremovedreason",
+        "device removed",
+        "dxgi_error_device_removed",
+        "dxgi_error_device_hung",
+        "out of memory",
+    )
+    return any(marker in lowered for marker in fallback_markers)
 
 
 def _enable_xformers_memory_efficient_attention(pipeline: Any) -> bool:
@@ -574,17 +592,18 @@ def _generate_image_local(prompt: str) -> str:
     elif LOCAL_SEED >= 0 and LOCAL_MODEL_USE_DIRECTML:
         logger.warning("LOCAL_SEED is ignored for DirectML local generation on this backend")
 
-    # Generate image with float16 model (native support on DirectML/CUDA)
+    # Generate image; DirectML may require CPU fallback if device is removed/suspended.
     try:
         result = pipeline(**generation_kwargs)
     except Exception as exc:
         error_text = str(exc)
         if (
             LOCAL_DIRECTML_FALLBACK_TO_CPU
-            and "does not support Double (Float64) operations" in error_text
+            and LOCAL_MODEL_USE_DIRECTML
+            and _should_fallback_from_directml(error_text)
         ):
             logger.warning(
-                "DirectML failed due to Float64 limitation. Falling back to CPU generation for this run."
+                "DirectML failed (device removed/suspended or unsupported op). Falling back to CPU generation for this run."
             )
             cpu_pipeline = _load_local_pipeline(model_source=model_source, use_directml=False)
             result = cpu_pipeline(**generation_kwargs)
