@@ -8,6 +8,7 @@ Simple local Python pipeline for selecting a Stable Diffusion-style prompt (from
 ai_art_bot/
 	app.py
 	requirements.txt
+	requirements-local.txt
 	scraper/
 		prompt_provider.py
 	generator/
@@ -40,8 +41,13 @@ ai_art_bot/
 cd ai_art_bot
 python -m venv .venv
 source .venv/bin/activate
-pip install -r requirements.txt
+pip install -r requirements-local.txt
 ```
+
+Dependency files:
+
+- `requirements.txt`: minimal Streamlit Cloud dependencies for prompt-management-only deployment.
+- `requirements-local.txt`: full local dependencies for generation/upscale/upload pipeline.
 
 ## Environment variables
 
@@ -227,7 +233,8 @@ streamlit run app.py
 
 Deployment behavior:
 
-- Deployed Streamlit mode shows only manual prompt queue controls and task status.
+- Deployed Streamlit mode shows only prompt management UI (prompt library + manual task creation).
+- Deployed Streamlit mode does not initialize the full pipeline runner and disables immediate task execution controls.
 - Local Streamlit mode includes full settings editor, queue list, and manual one-by-one run controls.
 - Set `APP_STREAMLIT_DEPLOYED=true` to force deployed mode behavior.
 

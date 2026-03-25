@@ -5,10 +5,6 @@ import sys
 from typing import Any, TYPE_CHECKING
 
 import requests
-import uvicorn
-from fastapi import FastAPI, HTTPException
-
-from database.db import get_task, list_images, list_tasks
 from utils.config import (
     SECRET_ENV_KEYS,
     WEB_CONFIG_KEYS,
@@ -23,6 +19,7 @@ from utils.logger import setup_logging
 
 
 if TYPE_CHECKING:
+    from fastapi import FastAPI
     from scheduler.scheduler import PipelineRunner
 
 
@@ -32,7 +29,49 @@ def _build_runner() -> "PipelineRunner":
     return PipelineRunner()
 
 
-def build_dashboard() -> FastAPI:
+class _PromptCloudRunner:
+    def __init__(self) -> None:
+        from database.db import init_db
+
+        init_db()
+
+    def enqueue_manual_task(
+        self,
+        *,
+        prompt: str,
+        prompt_mode: str,
+        pipeline_mode: str,
+        settings: dict[str, Any] | None = None,
+        source_image_path: str | None = None,
+        source_upscaled_path: str | None = None,
+    ) -> int:
+        from database.db import enqueue_task
+
+        if not prompt.strip():
+            raise RuntimeError("Manual prompt cannot be empty")
+        return enqueue_task(
+            prompt=prompt.strip(),
+            prompt_mode=prompt_mode,
+            pipeline_mode=pipeline_mode,
+            settings=settings,
+            source_image_path=source_image_path,
+            source_upscaled_path=source_upscaled_path,
+        )
+
+    def get_queue(self, limit: int = 100, status: str | None = None) -> list[dict]:
+        from database.db import list_tasks
+
+        return list_tasks(limit=limit, status=status)
+
+
+def _build_cloud_prompt_runner() -> _PromptCloudRunner:
+    return _PromptCloudRunner()
+
+
+def build_dashboard() -> "FastAPI":
+    from fastapi import FastAPI, HTTPException
+    from database.db import get_task, list_images, list_tasks
+
     app = FastAPI(title="AI Art Bot", version="0.1.0")
     runner = _build_runner()
 
@@ -456,6 +495,40 @@ def _render_settings_editor(saved_settings: dict[str, str]) -> dict[str, str]:
             key="cfg_PROMPT_ENHANCER_MODEL",
         )
 
+    st.markdown("##### Prompt Library Storage")
+    prompt_backend_default = saved_settings.get(
+        "PROMPT_LIBRARY_BACKEND",
+        os.getenv("PROMPT_LIBRARY_BACKEND", "local_json"),
+    ).strip().lower()
+    prompt_backend_options = ["local_json", "github_gist"]
+    settings_payload["PROMPT_LIBRARY_BACKEND"] = st.selectbox(
+        "PROMPT_LIBRARY_BACKEND",
+        options=prompt_backend_options,
+        index=prompt_backend_options.index(prompt_backend_default)
+        if prompt_backend_default in prompt_backend_options
+        else 0,
+        key="cfg_PROMPT_LIBRARY_BACKEND",
+        help="Use github_gist to sync prompt library changes between local and Streamlit Cloud.",
+    )
+
+    if settings_payload["PROMPT_LIBRARY_BACKEND"] == "github_gist":
+        col1, col2 = st.columns(2)
+        with col1:
+            settings_payload["PROMPT_LIBRARY_GIST_ID"] = st.text_input(
+                "PROMPT_LIBRARY_GIST_ID",
+                value=saved_settings.get("PROMPT_LIBRARY_GIST_ID", os.getenv("PROMPT_LIBRARY_GIST_ID", "")),
+                key="cfg_PROMPT_LIBRARY_GIST_ID",
+            )
+        with col2:
+            settings_payload["PROMPT_LIBRARY_GIST_FILENAME"] = st.text_input(
+                "PROMPT_LIBRARY_GIST_FILENAME",
+                value=saved_settings.get(
+                    "PROMPT_LIBRARY_GIST_FILENAME",
+                    os.getenv("PROMPT_LIBRARY_GIST_FILENAME", "prompt_library.json"),
+                ),
+                key="cfg_PROMPT_LIBRARY_GIST_FILENAME",
+            )
+
     if st.button("Save Configuration", use_container_width=True, type="primary"):
         save_web_settings(settings_payload)
         apply_web_settings_to_env(settings_payload)
@@ -582,7 +655,7 @@ def _save_prompt_library(library: dict[str, Any]) -> None:
 
 
 def _render_manual_prompt_panel(
-    runner: "PipelineRunner",
+    runner: Any,
     deployed_mode: bool,
     task_settings: dict[str, str],
 ) -> None:
@@ -706,8 +779,11 @@ def _render_manual_prompt_panel(
         if pipeline_mode in {"upload_only"}:
             source_upscaled_path = st.text_input("Source upscaled path (optional, preferred for upload)")
 
-        start_immediately_default = True if deployed_mode else False
-        start_immediately = st.checkbox("Start immediately after queueing", value=start_immediately_default)
+        if deployed_mode:
+            start_immediately = False
+            st.caption("Task execution controls are disabled in deployed prompt-management mode.")
+        else:
+            start_immediately = st.checkbox("Start immediately after queueing", value=False)
 
         required_secrets, missing_secrets = _required_secrets_for_mode(st, pipeline_mode, task_settings)
 
@@ -808,31 +884,83 @@ def _render_queue_status_panel(runner: "PipelineRunner", deployed_mode: bool) ->
             st.caption(f"Task #{task_id} error: {task['error_message']}")
 
 
+def _render_deployed_prompt_library_settings(saved_settings: dict[str, str]) -> dict[str, str]:
+    import streamlit as st
+
+    st.subheader("Prompt Library Settings")
+    st.caption("Optional: configure GitHub Gist sync for prompt_library.json in deployed mode.")
+
+    prompt_settings: dict[str, str] = {}
+    prompt_backend_default = saved_settings.get(
+        "PROMPT_LIBRARY_BACKEND",
+        os.getenv("PROMPT_LIBRARY_BACKEND", "local_json"),
+    ).strip().lower()
+    prompt_backend_options = ["local_json", "github_gist"]
+    prompt_settings["PROMPT_LIBRARY_BACKEND"] = st.selectbox(
+        "PROMPT_LIBRARY_BACKEND",
+        options=prompt_backend_options,
+        index=prompt_backend_options.index(prompt_backend_default)
+        if prompt_backend_default in prompt_backend_options
+        else 0,
+        key="deployed_PROMPT_LIBRARY_BACKEND",
+    )
+
+    if prompt_settings["PROMPT_LIBRARY_BACKEND"] == "github_gist":
+        col1, col2 = st.columns(2)
+        with col1:
+            prompt_settings["PROMPT_LIBRARY_GIST_ID"] = st.text_input(
+                "PROMPT_LIBRARY_GIST_ID",
+                value=saved_settings.get("PROMPT_LIBRARY_GIST_ID", os.getenv("PROMPT_LIBRARY_GIST_ID", "")),
+                key="deployed_PROMPT_LIBRARY_GIST_ID",
+            )
+        with col2:
+            prompt_settings["PROMPT_LIBRARY_GIST_FILENAME"] = st.text_input(
+                "PROMPT_LIBRARY_GIST_FILENAME",
+                value=saved_settings.get(
+                    "PROMPT_LIBRARY_GIST_FILENAME",
+                    os.getenv("PROMPT_LIBRARY_GIST_FILENAME", "prompt_library.json"),
+                ),
+                key="deployed_PROMPT_LIBRARY_GIST_FILENAME",
+            )
+
+    if st.button("Save Prompt Library Settings", use_container_width=True, key="save_deployed_prompt_library"):
+        merged_settings = dict(saved_settings)
+        merged_settings.update(prompt_settings)
+        save_web_settings(merged_settings)
+        apply_web_settings_to_env(merged_settings)
+        st.success("Prompt library settings saved")
+        st.rerun()
+
+    return prompt_settings
+
+
 def run_streamlit_app() -> None:
     import streamlit as st
 
     setup_logging()
     saved_settings = _load_and_apply_saved_settings()
-    runner = _build_runner()
     deployed_mode = _is_deployed_streamlit()
 
     st.set_page_config(page_title="AI Art Bot Queue", layout="wide")
     st.title("AI Art Bot Queue")
-    st.caption("Queue manual prompts, choose pipeline mode, and track task status.")
+    st.caption("Prompt library and manual prompt task creation.")
 
     if deployed_mode:
-        st.info("Deployed mode: manual prompt queue only")
-        st.caption("Cloud runtime profile enabled: IMAGE_BACKEND=openai, UPSCALER_BACKEND=replicate")
+        runner = _build_cloud_prompt_runner()
+        st.info("Deployed mode: prompt management only")
+        with st.expander("Prompt Library", expanded=False):
+            _render_deployed_prompt_library_settings(saved_settings)
         active_settings = _cloud_runtime_settings(saved_settings)
-        _render_secret_status(st)
     else:
+        runner = _build_runner()
         with st.expander("Global Settings", expanded=False):
             active_settings = _render_settings_editor(saved_settings)
         with st.expander("Secrets Validation", expanded=True):
             _render_secret_status(st)
 
     _render_manual_prompt_panel(runner=runner, deployed_mode=deployed_mode, task_settings=active_settings)
-    _render_queue_status_panel(runner=runner, deployed_mode=deployed_mode)
+    if not deployed_mode:
+        _render_queue_status_panel(runner=runner, deployed_mode=deployed_mode)
 
 
 def main() -> None:
@@ -877,6 +1005,8 @@ def main() -> None:
     args = parser.parse_args()
 
     if args.command == "serve":
+        import uvicorn
+
         uvicorn.run(build_dashboard(), host=args.host, port=args.port)
         return
 
