@@ -77,7 +77,7 @@ numpy==1.26.4
 onnx==1.20.1
 onnxruntime-directml==1.23.0; platform_system == "Windows"
 openai==1.68.2
-opencv-python==4.11.0.86
+opencv-python-headless==4.11.0.86
 optimum==1.22.0
 packaging==24.2
 pandas==2.3.3

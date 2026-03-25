@@ -6,7 +6,6 @@ from pathlib import Path
 import replicate
 import requests
 
-from upscaler.accelerated_upscaler import upscale_with_directml
 from utils.config import UPSCALED_DIR, WEIGHTS_DIR, get_settings
 from utils.logger import logger
 
@@ -210,6 +209,8 @@ def upscale_image(image_path: str) -> str:
     if UPSCALER_BACKEND == "replicate":
         return _upscale_with_replicate(image_path)
     if UPSCALER_BACKEND == "directml":
+        from upscaler.accelerated_upscaler import upscale_with_directml
+
         return upscale_with_directml(image_path)
     raise RuntimeError(
         "Unsupported UPSCALER_BACKEND "

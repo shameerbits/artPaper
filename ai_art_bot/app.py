@@ -2,16 +2,13 @@ import argparse
 import json
 import os
 import sys
-from typing import Any
+from typing import Any, TYPE_CHECKING
 
 import requests
 import uvicorn
 from fastapi import FastAPI, HTTPException
 
 from database.db import get_task, list_images, list_tasks
-from generator.image_generator import download_local_model
-from scheduler.scheduler import PipelineRunner
-from uploader.deviantart_upload import bootstrap_tokens
 from utils.config import (
     SECRET_ENV_KEYS,
     WEB_CONFIG_KEYS,
@@ -25,9 +22,19 @@ from utils.logger import logger
 from utils.logger import setup_logging
 
 
+if TYPE_CHECKING:
+    from scheduler.scheduler import PipelineRunner
+
+
+def _build_runner() -> "PipelineRunner":
+    from scheduler.scheduler import PipelineRunner
+
+    return PipelineRunner()
+
+
 def build_dashboard() -> FastAPI:
     app = FastAPI(title="AI Art Bot", version="0.1.0")
-    runner = PipelineRunner()
+    runner = _build_runner()
 
     @app.get("/images")
     def images() -> list[dict]:
@@ -88,6 +95,14 @@ def _load_and_apply_saved_settings() -> dict[str, str]:
     if saved:
         apply_web_settings_to_env(saved)
     return saved
+
+
+def _cloud_runtime_settings(saved_settings: dict[str, str]) -> dict[str, str]:
+    runtime = dict(saved_settings)
+    # Streamlit Cloud should default to lightweight and portable backends.
+    runtime["IMAGE_BACKEND"] = "openai"
+    runtime["UPSCALER_BACKEND"] = "replicate"
+    return runtime
 
 
 def _lookup_secret(st: Any, name: str) -> str:
@@ -567,7 +582,7 @@ def _save_prompt_library(library: dict[str, Any]) -> None:
 
 
 def _render_manual_prompt_panel(
-    runner: PipelineRunner,
+    runner: "PipelineRunner",
     deployed_mode: bool,
     task_settings: dict[str, str],
 ) -> None:
@@ -738,7 +753,7 @@ def _render_manual_prompt_panel(
                 st.rerun()
 
 
-def _render_queue_status_panel(runner: PipelineRunner, deployed_mode: bool) -> None:
+def _render_queue_status_panel(runner: "PipelineRunner", deployed_mode: bool) -> None:
     import streamlit as st
 
     st.subheader("Task Queue Status")
@@ -798,7 +813,7 @@ def run_streamlit_app() -> None:
 
     setup_logging()
     saved_settings = _load_and_apply_saved_settings()
-    runner = PipelineRunner()
+    runner = _build_runner()
     deployed_mode = _is_deployed_streamlit()
 
     st.set_page_config(page_title="AI Art Bot Queue", layout="wide")
@@ -807,7 +822,8 @@ def run_streamlit_app() -> None:
 
     if deployed_mode:
         st.info("Deployed mode: manual prompt queue only")
-        active_settings = saved_settings
+        st.caption("Cloud runtime profile enabled: IMAGE_BACKEND=openai, UPSCALER_BACKEND=replicate")
+        active_settings = _cloud_runtime_settings(saved_settings)
         _render_secret_status(st)
     else:
         with st.expander("Global Settings", expanded=False):
@@ -865,18 +881,22 @@ def main() -> None:
         return
 
     if args.command == "auth_deviantart":
+        from uploader.deviantart_upload import bootstrap_tokens
+
         payload = bootstrap_tokens()
         has_refresh = bool(payload.get("refresh_token"))
         logger.info(f"DeviantArt authorization complete. refresh_token_saved={has_refresh}")
         return
 
     if args.command == "download_model":
+        from generator.image_generator import download_local_model
+
         model_path = download_local_model(model_id=args.model_id, local_dir=args.local_dir or None)
         logger.info(f"Local model ready at: {model_path}")
         return
 
     get_settings().validate(args.command)
-    runner = PipelineRunner()
+    runner = _build_runner()
     if args.command == "run_once":
         runner.run_once(mode="full")
     elif args.command == "run_loop":
