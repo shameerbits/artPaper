@@ -952,7 +952,22 @@ def run_streamlit_app() -> None:
             _render_deployed_prompt_library_settings(saved_settings)
         active_settings = _cloud_runtime_settings(saved_settings)
     else:
-        runner = _build_runner()
+        try:
+            runner = _build_runner()
+        except ModuleNotFoundError as exc:
+            # Fall back to prompt-only mode when optional local pipeline deps are unavailable.
+            deployed_mode = True
+            runner = _build_cloud_prompt_runner()
+            logger.warning(f"Falling back to deployed prompt-only mode due to missing module: {exc}")
+            st.warning(
+                "Full local pipeline dependencies are missing in this environment. "
+                "Switched to prompt-management-only mode."
+            )
+            with st.expander("Prompt Library", expanded=False):
+                _render_deployed_prompt_library_settings(saved_settings)
+            active_settings = _cloud_runtime_settings(saved_settings)
+            _render_manual_prompt_panel(runner=runner, deployed_mode=deployed_mode, task_settings=active_settings)
+            return
         with st.expander("Global Settings", expanded=False):
             active_settings = _render_settings_editor(saved_settings)
         with st.expander("Secrets Validation", expanded=True):
