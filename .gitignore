@@ -4,3 +4,4 @@ ai_art_bot/data/generated/*.png
 ai_art_bot/data/upscaled/*.png
 ai_art_bot/data/images.db
 ai_art_bot/data/app.log
+!ai_art_bot/prompt_library.json

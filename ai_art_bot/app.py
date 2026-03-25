@@ -1,8 +1,10 @@
 import argparse
+import json
 import os
 import sys
 from typing import Any
 
+import requests
 import uvicorn
 from fastapi import FastAPI, HTTPException
 
@@ -450,29 +452,117 @@ def _render_settings_editor(saved_settings: dict[str, str]) -> dict[str, str]:
 
 def _get_prompt_library_path() -> str:
     from pathlib import Path
-    prompt_lib_path = Path(__file__).resolve().parents[1] / "data" / "prompt_library.json"
-    return str(prompt_lib_path)
+
+    default_path = Path(__file__).resolve().parent / "prompt_library.json"
+    configured_path = os.getenv("PROMPT_LIBRARY_PATH", str(default_path)).strip()
+    path = Path(configured_path).expanduser()
+
+    # One-time migration from legacy location.
+    legacy_path = Path(__file__).resolve().parents[1] / "data" / "prompt_library.json"
+    if not path.exists() and legacy_path.exists():
+        try:
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text(legacy_path.read_text(encoding="utf-8"), encoding="utf-8")
+            logger.info(f"Migrated prompt library from {legacy_path} to {path}")
+        except Exception as exc:
+            logger.warning(f"Failed to migrate prompt library from legacy path: {exc}")
+
+    return str(path)
+
+
+def _prompt_library_backend() -> str:
+    return os.getenv("PROMPT_LIBRARY_BACKEND", "local_json").strip().lower()
+
+
+def _load_prompt_library_from_gist() -> dict[str, Any]:
+    gist_id = os.getenv("PROMPT_LIBRARY_GIST_ID", "").strip()
+    gist_filename = os.getenv("PROMPT_LIBRARY_GIST_FILENAME", "prompt_library.json").strip() or "prompt_library.json"
+    github_token = os.getenv("GITHUB_TOKEN", "").strip()
+
+    if not gist_id or not github_token:
+        logger.warning("GitHub Gist prompt library backend requires PROMPT_LIBRARY_GIST_ID and GITHUB_TOKEN")
+        return {}
+
+    headers = {
+        "Accept": "application/vnd.github+json",
+        "Authorization": f"Bearer {github_token}",
+        "X-GitHub-Api-Version": "2022-11-28",
+    }
+    try:
+        response = requests.get(f"https://api.github.com/gists/{gist_id}", headers=headers, timeout=20)
+        response.raise_for_status()
+        payload = response.json()
+        files = payload.get("files", {})
+        file_payload = files.get(gist_filename, {}) if isinstance(files, dict) else {}
+        content = file_payload.get("content", "{}") if isinstance(file_payload, dict) else "{}"
+        parsed = json.loads(content or "{}")
+        if not isinstance(parsed, dict):
+            logger.warning("GitHub Gist prompt library content is not a JSON object")
+            return {}
+        return parsed
+    except Exception as exc:
+        logger.warning(f"Failed to load prompt library from GitHub Gist: {exc}")
+        return {}
+
+
+def _save_prompt_library_to_gist(library: dict[str, Any]) -> None:
+    gist_id = os.getenv("PROMPT_LIBRARY_GIST_ID", "").strip()
+    gist_filename = os.getenv("PROMPT_LIBRARY_GIST_FILENAME", "prompt_library.json").strip() or "prompt_library.json"
+    github_token = os.getenv("GITHUB_TOKEN", "").strip()
+
+    if not gist_id or not github_token:
+        raise RuntimeError("GitHub Gist prompt library backend requires PROMPT_LIBRARY_GIST_ID and GITHUB_TOKEN")
+
+    headers = {
+        "Accept": "application/vnd.github+json",
+        "Authorization": f"Bearer {github_token}",
+        "X-GitHub-Api-Version": "2022-11-28",
+    }
+    payload = {
+        "files": {
+            gist_filename: {
+                "content": json.dumps(library, indent=2)
+            }
+        }
+    }
+    response = requests.patch(
+        f"https://api.github.com/gists/{gist_id}",
+        headers=headers,
+        json=payload,
+        timeout=20,
+    )
+    response.raise_for_status()
 
 
 def _load_prompt_library() -> dict[str, Any]:
-    import json
     from pathlib import Path
+
+    backend = _prompt_library_backend()
+    if backend == "github_gist":
+        return _load_prompt_library_from_gist()
+
     path = _get_prompt_library_path()
     if Path(path).exists():
         try:
-            with open(path, "r") as f:
-                return json.load(f)
+            with open(path, "r", encoding="utf-8") as f:
+                payload = json.load(f)
+            return payload if isinstance(payload, dict) else {}
         except Exception:
             return {}
     return {}
 
 
 def _save_prompt_library(library: dict[str, Any]) -> None:
-    import json
     from pathlib import Path
+
+    backend = _prompt_library_backend()
+    if backend == "github_gist":
+        _save_prompt_library_to_gist(library)
+        return
+
     path = _get_prompt_library_path()
     Path(path).parent.mkdir(parents=True, exist_ok=True)
-    with open(path, "w") as f:
+    with open(path, "w", encoding="utf-8") as f:
         json.dump(library, f, indent=2)
 
 
@@ -488,6 +578,11 @@ def _render_manual_prompt_panel(
     queued_prompts = {task.get("prompt", "").strip() for task in task_list if task.get("prompt")}
 
     st.subheader("Prompt Management")
+    backend = _prompt_library_backend()
+    if backend == "github_gist":
+        st.caption("Prompt library storage: GitHub Gist")
+    else:
+        st.caption(f"Prompt library storage: {_get_prompt_library_path()}")
     
     tab1, tab2 = st.tabs(["Prompt Library", "Create Task from Prompt"])
     

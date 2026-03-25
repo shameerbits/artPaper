@@ -87,6 +87,11 @@ export RUN_INTERVAL_MINUTES="60"
 export CIVITAI_IMAGES_API="https://civitai.com/api/v1/images"
 export PROMPT_API_TIMEOUT_SECONDS="15"
 export PROMPT_ENHANCER_MODEL="gpt-4.1-mini"
+export PROMPT_LIBRARY_BACKEND="local_json"
+export PROMPT_LIBRARY_PATH="./ai_art_bot/prompt_library.json"
+export PROMPT_LIBRARY_GIST_ID=""
+export PROMPT_LIBRARY_GIST_FILENAME="prompt_library.json"
+export GITHUB_TOKEN=""
 ```
 
 Notes:
@@ -106,6 +111,7 @@ Notes:
 - `ACCEL_TILE` can be enabled for accelerated backends to process very large images in chunks.
 - Prompt collection uses CivitAI-style API data first, then a local prompt generator, then `prompts.txt` fallback.
 - Selected prompts are enhanced with OpenAI (`gpt-4.1-mini` by default) for richer detail, lighting, and composition.
+- Prompt library storage supports `PROMPT_LIBRARY_BACKEND=local_json` (default, git-tracked file) or `PROMPT_LIBRARY_BACKEND=github_gist` (shared Cloud/local source of truth).
 
 Local image generation options:
 
@@ -224,6 +230,13 @@ Deployment behavior:
 - Deployed Streamlit mode shows only manual prompt queue controls and task status.
 - Local Streamlit mode includes full settings editor, queue list, and manual one-by-one run controls.
 - Set `APP_STREAMLIT_DEPLOYED=true` to force deployed mode behavior.
+
+Prompt library persistence:
+
+- Default (`PROMPT_LIBRARY_BACKEND=local_json`): prompt entries are saved to `./ai_art_bot/prompt_library.json`.
+- To publish prompt changes via PR: commit and push `ai_art_bot/prompt_library.json`.
+- Shared Cloud/local option (`PROMPT_LIBRARY_BACKEND=github_gist`): set `PROMPT_LIBRARY_GIST_ID`, optional `PROMPT_LIBRARY_GIST_FILENAME`, and `GITHUB_TOKEN` in both environments.
+- With `github_gist`, both Streamlit Cloud and local runs read/write the same Gist file (single source of truth).
 
 ## Dashboard
 
