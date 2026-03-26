@@ -677,6 +677,16 @@ def _render_manual_prompt_panel(
     # TAB 1: Prompt Library
     with tab1:
         st.markdown("#### Add to Prompt Library")
+
+        def _next_prompt_id(existing_library: dict[str, Any]) -> str:
+            numeric_ids = []
+            for key in existing_library.keys():
+                try:
+                    numeric_ids.append(int(str(key)))
+                except (TypeError, ValueError):
+                    continue
+            return str(max(numeric_ids, default=0) + 1)
+
         col1, col2 = st.columns([3, 1])
         with col1:
             new_prompt = st.text_area(
@@ -690,8 +700,8 @@ def _render_manual_prompt_panel(
             st.markdown("")
             if st.button("Add to Library", use_container_width=True, type="primary"):
                 if new_prompt.strip():
-                    prompt_id = len(library) + 1
-                    library[str(prompt_id)] = {
+                    prompt_id = _next_prompt_id(library)
+                    library[prompt_id] = {
                         "text": new_prompt.strip(),
                         "added_at": str(__import__("datetime").datetime.now()),
                     }
@@ -705,19 +715,48 @@ def _render_manual_prompt_panel(
         if library:
             # Sort by ID descending (latest first)
             sorted_prompts = sorted(library.items(), key=lambda x: int(x[0]), reverse=True)
-            
-            # Build table data
-            table_data = []
+
             for prompt_id, prompt_data in sorted_prompts:
-                in_queue = "✓ Yes" if prompt_data.get("text", "").strip() in queued_prompts else "✗ No"
-                table_data.append({
-                    "ID": prompt_id,
-                    "Prompt": prompt_data.get("text", "")[:80] + "..." if len(prompt_data.get("text", "")) > 80 else prompt_data.get("text", ""),
-                    "Added": prompt_data.get("added_at", "")[:10],
-                    "In Queue": in_queue,
-                })
-            
-            st.dataframe(table_data, use_container_width=True, hide_index=True)
+                prompt_text = str(prompt_data.get("text", "")).strip()
+                added_at = str(prompt_data.get("added_at", ""))[:10]
+                in_queue = "Yes" if prompt_text in queued_prompts else "No"
+
+                with st.container(border=True):
+                    meta_col1, meta_col2, meta_col3 = st.columns([1, 2, 1])
+                    meta_col1.markdown(f"**ID:** {prompt_id}")
+                    meta_col2.markdown(f"**Added:** {added_at or 'Unknown'}")
+                    meta_col3.markdown(f"**In Queue:** {in_queue}")
+
+                    st.text_area(
+                        f"Prompt #{prompt_id}",
+                        value=prompt_text,
+                        height=140,
+                        key=f"saved_prompt_preview_{prompt_id}",
+                        disabled=True,
+                    )
+
+                    edit_text = st.text_area(
+                        f"Edit prompt #{prompt_id}",
+                        value=prompt_text,
+                        height=120,
+                        key=f"saved_prompt_edit_{prompt_id}",
+                    )
+
+                    action_col1, action_col2 = st.columns(2)
+                    if action_col1.button("Save Changes", key=f"save_prompt_{prompt_id}", use_container_width=True):
+                        if not edit_text.strip():
+                            st.error("Prompt cannot be empty")
+                        else:
+                            library[prompt_id]["text"] = edit_text.strip()
+                            _save_prompt_library(library)
+                            st.success(f"Prompt #{prompt_id} updated")
+                            st.rerun()
+
+                    if action_col2.button("Delete Prompt", key=f"delete_prompt_{prompt_id}", use_container_width=True):
+                        library.pop(prompt_id, None)
+                        _save_prompt_library(library)
+                        st.success(f"Prompt #{prompt_id} deleted")
+                        st.rerun()
         else:
             st.info("No prompts in library yet. Add one above!")
 

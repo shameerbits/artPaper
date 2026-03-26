@@ -48,6 +48,29 @@ def _persist_token_payload(payload: dict, fallback_refresh_token: str = "") -> N
         token_payload["expires_at"] = int(time.time()) + int(payload["expires_in"])
     if token_payload:
         _save_cached_tokens(token_payload)
+        # Keep runtime values in sync so retries in the same process use the latest tokens.
+        if token_payload.get("access_token"):
+            os.environ["DEVIANTART_ACCESS_TOKEN"] = str(token_payload["access_token"])
+        if token_payload.get("refresh_token"):
+            os.environ["DEVIANTART_REFRESH_TOKEN"] = str(token_payload["refresh_token"])
+
+
+def _request_refreshed_access_token(refresh_token: str, settings: object) -> tuple[bool, str, str]:
+    response = requests.post(
+        TOKEN_URL,
+        data={
+            "grant_type": "refresh_token",
+            "refresh_token": refresh_token,
+            "client_id": getattr(settings, "deviantart_client_id"),
+            "client_secret": getattr(settings, "deviantart_client_secret"),
+        },
+        timeout=60,
+    )
+    if response.ok:
+        payload = response.json()
+        _persist_token_payload(payload, fallback_refresh_token=refresh_token)
+        return True, str(payload.get("access_token", "")), ""
+    return False, "", f"{response.status_code}: {response.text}"
 
 
 def _exchange_auth_code_for_tokens(auth_code: str, redirect_uri: str) -> dict:
@@ -164,22 +187,11 @@ def _get_access_token() -> str:
 
     last_error: str = ""
     for refresh_token in refresh_candidates:
-        response = requests.post(
-            TOKEN_URL,
-            data={
-                "grant_type": "refresh_token",
-                "refresh_token": refresh_token,
-                "client_id": settings.deviantart_client_id,
-                "client_secret": settings.deviantart_client_secret,
-            },
-            timeout=60,
-        )
-        if response.ok:
-            payload = response.json()
-            _persist_token_payload(payload, fallback_refresh_token=refresh_token)
-            return payload["access_token"]
+        ok, access_token, error = _request_refreshed_access_token(refresh_token, settings)
+        if ok and access_token:
+            return access_token
 
-        last_error = f"{response.status_code}: {response.text}"
+        last_error = error
         logger.warning("DeviantArt token refresh failed for one refresh token candidate; trying fallback if available")
 
     message = (
