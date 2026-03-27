@@ -716,47 +716,90 @@ def _render_manual_prompt_panel(
             # Sort by ID descending (latest first)
             sorted_prompts = sorted(library.items(), key=lambda x: int(x[0]), reverse=True)
 
+            if "selected_prompt_id" not in st.session_state:
+                st.session_state["selected_prompt_id"] = ""
+            if "editing_prompt_id" not in st.session_state:
+                st.session_state["editing_prompt_id"] = ""
+
+            st.caption("Select a row to edit or delete. Full prompt text is shown directly in the table row.")
+
+            header_cols = st.columns([1, 2, 1, 8, 2])
+            header_cols[0].markdown("**ID**")
+            header_cols[1].markdown("**Added**")
+            header_cols[2].markdown("**In Queue**")
+            header_cols[3].markdown("**Prompt**")
+            header_cols[4].markdown("**Actions**")
+
             for prompt_id, prompt_data in sorted_prompts:
                 prompt_text = str(prompt_data.get("text", "")).strip()
                 added_at = str(prompt_data.get("added_at", ""))[:10]
                 in_queue = "Yes" if prompt_text in queued_prompts else "No"
+                is_selected = st.session_state.get("selected_prompt_id", "") == prompt_id
+                is_editing = st.session_state.get("editing_prompt_id", "") == prompt_id
+                edit_key = f"saved_prompt_edit_{prompt_id}"
 
-                with st.container(border=True):
-                    meta_col1, meta_col2, meta_col3 = st.columns([1, 2, 1])
-                    meta_col1.markdown(f"**ID:** {prompt_id}")
-                    meta_col2.markdown(f"**Added:** {added_at or 'Unknown'}")
-                    meta_col3.markdown(f"**In Queue:** {in_queue}")
+                row_cols = st.columns([1, 2, 1, 8, 2])
+                row_cols[0].write(prompt_id)
+                row_cols[1].write(added_at or "Unknown")
+                row_cols[2].write(in_queue)
 
-                    st.text_area(
-                        f"Prompt #{prompt_id}",
-                        value=prompt_text,
-                        height=140,
-                        key=f"saved_prompt_preview_{prompt_id}",
-                        disabled=True,
-                    )
-
-                    edit_text = st.text_area(
+                if is_selected and is_editing:
+                    if edit_key not in st.session_state:
+                        st.session_state[edit_key] = prompt_text
+                    row_cols[3].text_area(
                         f"Edit prompt #{prompt_id}",
-                        value=prompt_text,
-                        height=120,
-                        key=f"saved_prompt_edit_{prompt_id}",
+                        key=edit_key,
+                        height=100,
+                        label_visibility="collapsed",
                     )
+                else:
+                    row_cols[3].write(prompt_text)
 
-                    action_col1, action_col2 = st.columns(2)
-                    if action_col1.button("Save Changes", key=f"save_prompt_{prompt_id}", use_container_width=True):
-                        if not edit_text.strip():
-                            st.error("Prompt cannot be empty")
-                        else:
-                            library[prompt_id]["text"] = edit_text.strip()
+                if row_cols[4].button(
+                    "Selected" if is_selected else "Select",
+                    key=f"select_prompt_{prompt_id}",
+                    use_container_width=True,
+                    disabled=is_selected,
+                ):
+                    st.session_state["selected_prompt_id"] = prompt_id
+                    st.session_state["editing_prompt_id"] = ""
+                    st.rerun()
+
+                if is_selected:
+                    if is_editing:
+                        if row_cols[4].button("Save", key=f"save_prompt_{prompt_id}", use_container_width=True):
+                            updated_text = str(st.session_state.get(edit_key, "")).strip()
+                            if not updated_text:
+                                st.error("Prompt cannot be empty")
+                            else:
+                                library[prompt_id]["text"] = updated_text
+                                _save_prompt_library(library)
+                                st.session_state["editing_prompt_id"] = ""
+                                st.success(f"Prompt #{prompt_id} updated")
+                                st.rerun()
+                        if row_cols[4].button("Cancel", key=f"cancel_prompt_{prompt_id}", use_container_width=True):
+                            st.session_state["editing_prompt_id"] = ""
+                            st.session_state[edit_key] = prompt_text
+                            st.rerun()
+                    else:
+                        if row_cols[4].button("Edit", key=f"edit_prompt_{prompt_id}", use_container_width=True):
+                            st.session_state[edit_key] = prompt_text
+                            st.session_state["editing_prompt_id"] = prompt_id
+                            st.rerun()
+                        if row_cols[4].button(
+                            "Delete",
+                            key=f"delete_prompt_{prompt_id}",
+                            use_container_width=True,
+                        ):
+                            library.pop(prompt_id, None)
+                            if st.session_state.get("selected_prompt_id") == prompt_id:
+                                st.session_state["selected_prompt_id"] = ""
+                                st.session_state["editing_prompt_id"] = ""
                             _save_prompt_library(library)
-                            st.success(f"Prompt #{prompt_id} updated")
+                            st.success(f"Prompt #{prompt_id} deleted")
                             st.rerun()
 
-                    if action_col2.button("Delete Prompt", key=f"delete_prompt_{prompt_id}", use_container_width=True):
-                        library.pop(prompt_id, None)
-                        _save_prompt_library(library)
-                        st.success(f"Prompt #{prompt_id} deleted")
-                        st.rerun()
+                st.divider()
         else:
             st.info("No prompts in library yet. Add one above!")
 
@@ -822,7 +865,20 @@ def _render_manual_prompt_panel(
             start_immediately = False
             st.caption("Task execution controls are disabled in deployed prompt-management mode.")
         else:
-            start_immediately = st.checkbox("Start immediately after queueing", value=False)
+            default_auto_run = _is_true(task_settings.get("AUTO_QUEUE_ON_ADD", os.getenv("AUTO_QUEUE_ON_ADD", "false")))
+            start_immediately = st.checkbox(
+                "Auto-run immediately after queueing",
+                value=default_auto_run,
+                key="manual_auto_run_after_queue",
+                help="Use Save Auto Queue Preference to keep this as the default behavior.",
+            )
+            if st.button("Save Auto Queue Preference", key="save_auto_queue_preference"):
+                merged_settings = load_web_settings()
+                merged_settings["AUTO_QUEUE_ON_ADD"] = "true" if start_immediately else "false"
+                save_web_settings(merged_settings)
+                apply_web_settings_to_env(merged_settings)
+                task_settings["AUTO_QUEUE_ON_ADD"] = merged_settings["AUTO_QUEUE_ON_ADD"]
+                st.success("Auto queue preference saved")
 
         required_secrets, missing_secrets = _required_secrets_for_mode(st, pipeline_mode, task_settings)
 
