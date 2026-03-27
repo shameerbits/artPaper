@@ -845,7 +845,6 @@ def _render_manual_prompt_panel(
                                 st.rerun()
                         if row_cols[4].button("Cancel", key=f"cancel_prompt_{prompt_id}", use_container_width=True):
                             st.session_state["editing_prompt_id"] = ""
-                            st.session_state[edit_key] = prompt_text
                             st.rerun()
                     else:
                         if row_cols[4].button("Edit", key=f"edit_prompt_{prompt_id}", use_container_width=True):
