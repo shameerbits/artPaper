@@ -912,9 +912,12 @@ def _render_manual_prompt_panel(
                 index=2,
             )
 
+        if "manual_auto_queue_mode" not in st.session_state:
+            st.session_state["manual_auto_queue_mode"] = False
+
         auto_queue_mode = st.checkbox(
             "Auto-queue next eligible prompt after completion",
-            value=False,
+            key="manual_auto_queue_mode",
             help="When enabled, each successful/failed run auto-enqueues the next prompt-library item that is not queued/running.",
         )
 
@@ -1047,9 +1050,11 @@ def _render_queue_status_panel(runner: "PipelineRunner", deployed_mode: bool) ->
 
     st.subheader("Task Queue Status")
     library = _load_prompt_library()
+    if "queue_panel_auto_queue" not in st.session_state:
+        st.session_state["queue_panel_auto_queue"] = False
+
     auto_queue_mode = st.checkbox(
         "Auto-queue next eligible prompt after completion (queue panel)",
-        value=False,
         key="queue_panel_auto_queue",
     )
 
