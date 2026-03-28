@@ -999,7 +999,39 @@ def _render_queue_status_panel(runner: "PipelineRunner", deployed_mode: bool) ->
 
     if not deployed_mode:
         controls = st.columns(2)
+        import threading
+        import time as _time
+        from uploader.deviantart_upload import validate_deviantart_token
+        # Start a background thread to refresh DeviantArt token every 10 minutes
+        if not hasattr(st.session_state, "_deviantart_token_refresher"):
+            def _refresh_token_loop():
+                while True:
+                    validate_deviantart_token(force_refresh=True)
+                    _time.sleep(600)  # 10 minutes
+            refresher = threading.Thread(target=_refresh_token_loop, daemon=True)
+            refresher.start()
+            st.session_state["_deviantart_token_refresher"] = True
+
         if controls[0].button("Start Next Queued Task"):
+            # Validate DeviantArt token before running the task
+            if not validate_deviantart_token():
+                st.error("DeviantArt authorization is invalid or expired. Please re-authorize before running tasks.")
+                from uploader.deviantart_upload import AUTHORIZE_URL
+                import os
+                settings = os.environ
+                client_id = settings.get("DEVIANTART_CLIENT_ID", "")
+                redirect_uri = settings.get("DEVIANTART_REDIRECT_URI", "http://localhost:8501/callback")
+                scope = settings.get("DEVIANTART_SCOPE", "stash publish")
+                import urllib.parse
+                query = urllib.parse.urlencode({
+                    "response_type": "code",
+                    "client_id": client_id,
+                    "redirect_uri": redirect_uri,
+                    "scope": scope,
+                }, quote_via=urllib.parse.quote)
+                authorize_url = f"{AUTHORIZE_URL}?{query}"
+                st.markdown(f"[Click here to re-authorize DeviantArt]({authorize_url})")
+                st.stop()
             next_queued_task = next((task for task in tasks if str(task.get("status", "")).strip().lower() == "queued"), None)
             next_prompt_id: str | None = None
             if next_queued_task:
@@ -1012,8 +1044,33 @@ def _render_queue_status_panel(runner: "PipelineRunner", deployed_mode: bool) ->
                         app_running=True,
                         auto_queue_enabled=auto_queue_mode,
                     )
-            with st.spinner("Starting next queued task..."):
-                result = runner.process_next_queued_task()
+            try:
+                with st.spinner("Starting next queued task..."):
+                    result = runner.process_next_queued_task()
+            except Exception as exc:
+                error_msg = str(exc)
+                if "auth_deviantart" in error_msg or "re-authorize" in error_msg or "refresh token" in error_msg:
+                    st.error("DeviantArt authorization failed or expired. Please re-authorize to continue uploads.")
+                    # Generate DeviantArt OAuth URL for user
+                    from uploader.deviantart_upload import AUTHORIZE_URL
+                    import os
+                    settings = os.environ
+                    client_id = settings.get("DEVIANTART_CLIENT_ID", "")
+                    redirect_uri = settings.get("DEVIANTART_REDIRECT_URI", "http://localhost:8501/callback")
+                    scope = settings.get("DEVIANTART_SCOPE", "stash publish")
+                    import urllib.parse
+                    query = urllib.parse.urlencode({
+                        "response_type": "code",
+                        "client_id": client_id,
+                        "redirect_uri": redirect_uri,
+                        "scope": scope,
+                    }, quote_via=urllib.parse.quote)
+                    authorize_url = f"{AUTHORIZE_URL}?{query}"
+                    st.markdown(f"[Click here to re-authorize DeviantArt]({authorize_url})")
+                    st.stop()
+                else:
+                    st.error(f"Task failed: {error_msg}")
+                    st.stop()
 
             completion_status = "success" if result.get("status") == "success" else "failure"
             if next_prompt_id:

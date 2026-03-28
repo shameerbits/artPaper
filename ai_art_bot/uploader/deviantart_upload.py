@@ -1,3 +1,22 @@
+def validate_deviantart_token(force_refresh: bool = False) -> bool:
+    """
+    Validate DeviantArt access token and refresh if needed. Returns True if valid, False otherwise.
+    If force_refresh is True, always try to refresh the token.
+    """
+    settings = get_settings()
+    cached_tokens = _load_cached_tokens()
+    cached_access = cached_tokens.get("access_token", "")
+    expires_at = int(cached_tokens.get("expires_at", 0) or 0)
+    if not force_refresh and cached_access and expires_at > int(time.time()) + 60:
+        return True
+    cached_refresh = str(cached_tokens.get("refresh_token", "") or "").strip()
+    env_refresh = str(settings.deviantart_refresh_token or "").strip()
+    refresh_candidates = [token for token in (cached_refresh, env_refresh) if token]
+    for refresh_token in refresh_candidates:
+        ok, access_token, _ = _request_refreshed_access_token(refresh_token, settings)
+        if ok and access_token:
+            return True
+    return False
 import json
 import os
 import time
