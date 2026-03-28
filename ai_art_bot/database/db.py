@@ -161,7 +161,7 @@ def list_tasks(limit: int = 100, status: str | None = None) -> list[dict]:
                 SELECT *
                 FROM tasks
                 WHERE status = ?
-                ORDER BY id DESC
+                ORDER BY id ASC
                 LIMIT ?
                 """,
                 (status, limit),
