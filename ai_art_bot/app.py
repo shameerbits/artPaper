@@ -714,22 +714,7 @@ def _render_manual_prompt_panel(
     library = _load_prompt_library()
     task_list = runner.get_queue(limit=500)
     queued_prompts = {task.get("prompt", "").strip() for task in task_list if task.get("prompt")}
-    status_priority = {"running": 3, "queued": 2, "failure": 1, "success": 1}
-    prompt_runtime_status: dict[str, str] = {}
-    for task in task_list:
-        prompt_text = str(task.get("prompt", "")).strip()
-        task_status = str(task.get("status", "")).strip().lower()
-        if not prompt_text or task_status not in status_priority:
-            continue
-        existing = prompt_runtime_status.get(prompt_text, "")
-        if status_priority.get(task_status, 0) >= status_priority.get(existing, 0):
-            prompt_runtime_status[prompt_text] = task_status
-
-    for prompt_id, prompt_data in library.items():
-        prompt_text = str(prompt_data.get("text", "")).strip()
-        runtime_status = prompt_runtime_status.get(prompt_text)
-        if runtime_status:
-            prompt_data["status"] = runtime_status
+    # Always compute 'In Queue' status live from DB
 
     st.subheader("Prompt Management")
     backend = _prompt_library_backend()
@@ -912,14 +897,7 @@ def _render_manual_prompt_panel(
                 index=2,
             )
 
-        if "manual_auto_queue_mode" not in st.session_state:
-            st.session_state["manual_auto_queue_mode"] = False
-
-        auto_queue_mode = st.checkbox(
-            "Auto-queue next eligible prompt after completion",
-            key="manual_auto_queue_mode",
-            help="When enabled, each successful/failed run auto-enqueues the next prompt-library item that is not queued/running.",
-        )
+        # Removed duplicate auto-queue checkbox from manual prompt panel
 
         source_image_path = ""
         source_upscaled_path = ""
@@ -936,23 +914,7 @@ def _render_manual_prompt_panel(
             source_upscaled_path = st.text_input("Source upscaled path (optional, preferred for upload)")
 
         if deployed_mode:
-            start_immediately = False
             st.caption("Task execution controls are disabled in deployed prompt-management mode.")
-        else:
-            default_auto_run = _is_true(task_settings.get("AUTO_QUEUE_ON_ADD", os.getenv("AUTO_QUEUE_ON_ADD", "false")))
-            start_immediately = st.checkbox(
-                "Auto-run immediately after queueing",
-                value=default_auto_run,
-                key="manual_auto_run_after_queue",
-                help="Use Save Auto Queue Preference to keep this as the default behavior.",
-            )
-            if st.button("Save Auto Queue Preference", key="save_auto_queue_preference"):
-                merged_settings = load_web_settings()
-                merged_settings["AUTO_QUEUE_ON_ADD"] = "true" if start_immediately else "false"
-                save_web_settings(merged_settings)
-                apply_web_settings_to_env(merged_settings)
-                task_settings["AUTO_QUEUE_ON_ADD"] = merged_settings["AUTO_QUEUE_ON_ADD"]
-                st.success("Auto queue preference saved")
 
         required_secrets, missing_secrets = _required_secrets_for_mode(st, pipeline_mode, task_settings)
 
@@ -993,55 +955,10 @@ def _render_manual_prompt_panel(
                     _set_prompt_status(library, prompt_id=selected_library_prompt_id, status="queued")
                     _maybe_persist_prompt_library(
                         library,
-                        app_running=bool(start_immediately),
-                        auto_queue_enabled=auto_queue_mode,
+                        app_running=False,
+                        auto_queue_enabled=False,
                     )
                 st.success(f"Task #{task_id} added to queue")
-
-                if start_immediately:
-                    if selected_library_prompt_id:
-                        _set_prompt_status(library, prompt_id=selected_library_prompt_id, status="running")
-                        _maybe_persist_prompt_library(
-                            library,
-                            app_running=True,
-                            auto_queue_enabled=auto_queue_mode,
-                        )
-                    with st.spinner("Processing task..."):
-                        result = runner.process_task(task_id)
-                    completion_status = "success" if result.get("status") == "success" else "failure"
-                    if selected_library_prompt_id:
-                        _set_prompt_status(library, prompt_id=selected_library_prompt_id, status=completion_status)
-                        _maybe_persist_prompt_library(
-                            library,
-                            app_running=True,
-                            auto_queue_enabled=auto_queue_mode,
-                        )
-
-                    if auto_queue_mode:
-                        next_prompt = _next_eligible_prompt_for_auto_queue(library)
-                        if next_prompt:
-                            next_prompt_id, next_prompt_text = next_prompt
-                            next_task_id = runner.enqueue_manual_task(
-                                prompt=next_prompt_text,
-                                prompt_mode=prompt_mode,
-                                pipeline_mode=pipeline_mode,
-                                settings=task_settings_payload,
-                                source_image_path=source_image_path or None,
-                                source_upscaled_path=source_upscaled_path or None,
-                            )
-                            _set_prompt_status(library, prompt_id=next_prompt_id, status="queued")
-                            _maybe_persist_prompt_library(
-                                library,
-                                app_running=True,
-                                auto_queue_enabled=True,
-                            )
-                            st.info(f"Auto-queued next prompt as task #{next_task_id}")
-                    if result.get("status") == "success":
-                        st.success(f"Task #{task_id} finished successfully")
-                    elif result.get("status") == "no_info":
-                        st.warning(result.get("message", "No info"))
-                    else:
-                        st.error(f"Task #{task_id} failed: {result.get('error', 'unknown error')}")
                 st.rerun()
 
 
@@ -1054,16 +971,26 @@ def _render_queue_status_panel(runner: "PipelineRunner", deployed_mode: bool) ->
         st.session_state["queue_panel_auto_queue"] = False
 
     auto_queue_mode = st.checkbox(
-        "Auto-queue next eligible prompt after completion (queue panel)",
+        "Auto-queue next eligible prompt after completion",
         key="queue_panel_auto_queue",
+        help="When enabled, each successful/failed run auto-enqueues the next prompt-library item that is not queued/running.",
     )
 
-    header_cols = st.columns([1, 2, 2, 2, 2])
+    # Save Auto Queue Preference button (moved here)
+    if st.button("Save Auto Queue Preference", key="save_auto_queue_preference_queue_panel"):
+        merged_settings = load_web_settings()
+        merged_settings["AUTO_QUEUE_ON_ADD"] = "true" if auto_queue_mode else "false"
+        save_web_settings(merged_settings)
+        apply_web_settings_to_env(merged_settings)
+        st.success("Auto queue preference saved")
+
+    header_cols = st.columns([1, 4, 2, 2, 2, 2])
     header_cols[0].markdown("**ID**")
-    header_cols[1].markdown("**Status**")
-    header_cols[2].markdown("**Mode**")
-    header_cols[3].markdown("**Created**")
-    header_cols[4].markdown("**Actions**")
+    header_cols[1].markdown("**Prompt**")
+    header_cols[2].markdown("**Status**")
+    header_cols[3].markdown("**Mode**")
+    header_cols[4].markdown("**Created**")
+    header_cols[5].markdown("**Actions**")
 
     tasks = runner.get_queue(limit=200)
     if not tasks:
@@ -1128,13 +1055,16 @@ def _render_queue_status_panel(runner: "PipelineRunner", deployed_mode: bool) ->
 
     for task in tasks:
         task_id = int(task["id"])
-        cols = st.columns([1, 2, 2, 2, 2])
+        prompt_text = str(task.get("prompt", ""))
+        truncated_prompt = (prompt_text[:80] + "...") if len(prompt_text) > 80 else prompt_text
+        cols = st.columns([1, 4, 2, 2, 2, 2])
         cols[0].write(task_id)
-        cols[1].write(task.get("status", "no_info"))
-        cols[2].write(task.get("pipeline_mode", "no_info"))
-        cols[3].write(task.get("created_at", "no_info"))
+        cols[1].write(truncated_prompt)
+        cols[2].write(task.get("status", "no_info"))
+        cols[3].write(task.get("pipeline_mode", "no_info"))
+        cols[4].write(task.get("created_at", "no_info"))
         if not deployed_mode and task.get("status") == "queued":
-            if cols[4].button(f"Run #{task_id}", key=f"run_task_{task_id}"):
+            if cols[5].button(f"Run #{task_id}", key=f"run_task_{task_id}"):
                 with st.spinner(f"Running task #{task_id}..."):
                     result = runner.process_task(task_id)
                 if result.get("status") == "success":
@@ -1143,7 +1073,7 @@ def _render_queue_status_panel(runner: "PipelineRunner", deployed_mode: bool) ->
                     st.error(f"Task #{task_id} failed: {result.get('error', 'unknown error')}")
                 st.rerun()
         else:
-            cols[4].write("-")
+            cols[5].write("-")
 
         if task.get("status") == "failure" and task.get("error_message"):
             st.caption(f"Task #{task_id} error: {task['error_message']}")
