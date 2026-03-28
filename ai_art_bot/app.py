@@ -1057,7 +1057,7 @@ def _render_queue_status_panel(runner: "PipelineRunner", deployed_mode: bool) ->
 
     # --- Auto-run logic ---
     if autorun:
-        # Find the oldest queued task and run it
+        # Only process tasks with status 'queued' (never retry failed tasks automatically)
         queued_tasks = runner.get_queue(limit=1000, status="queued")
         if queued_tasks:
             # Sort by id ascending (oldest first)
