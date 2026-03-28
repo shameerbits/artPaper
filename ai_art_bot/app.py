@@ -986,8 +986,15 @@ def _render_queue_status_panel(runner: "PipelineRunner", deployed_mode: bool) ->
     st.subheader("Task Queue Status")
     library = _load_prompt_library()
     # --- Auto-sync prompt status checkbox ---
-    if "queue_panel_auto_sync_prompt_status" not in st.session_state:
-        st.session_state["queue_panel_auto_sync_prompt_status"] = False
+    # --- Load preferences from web_settings.json if available ---
+    from utils.config import load_web_settings, save_web_settings
+    if "queue_panel_prefs_loaded" not in st.session_state:
+        prefs = load_web_settings()
+        st.session_state["queue_panel_auto_sync_prompt_status"] = prefs.get("AUTO_SYNC_PROMPT_STATUS", "false").lower() == "true"
+        st.session_state["queue_panel_autoqueue_add"] = prefs.get("AUTO_QUEUE_ADD", "false").lower() == "true"
+        st.session_state["queue_panel_autorun"] = prefs.get("AUTO_RUN", "false").lower() == "true"
+        st.session_state["queue_panel_prefs_loaded"] = True
+
     auto_sync_prompt_status = st.checkbox(
         "Auto-sync prompt status to gist",
         key="queue_panel_auto_sync_prompt_status",
@@ -1002,10 +1009,6 @@ def _render_queue_status_panel(runner: "PipelineRunner", deployed_mode: bool) ->
             st.warning(f"Prompt status sync failed: {exc}")
 
     # --- Auto-queue and Auto-run checkboxes ---
-    if "queue_panel_autoqueue_add" not in st.session_state:
-        st.session_state["queue_panel_autoqueue_add"] = False
-    if "queue_panel_autorun" not in st.session_state:
-        st.session_state["queue_panel_autorun"] = False
     autoqueue_add = st.checkbox(
         "Auto-queue eligible prompts (add to queue)",
         key="queue_panel_autoqueue_add",
@@ -1016,6 +1019,15 @@ def _render_queue_status_panel(runner: "PipelineRunner", deployed_mode: bool) ->
         key="queue_panel_autorun",
         help="When enabled, this instance will automatically process queued tasks as a worker.",
     )
+
+    # --- Save preferences button ---
+    if st.button("Save Auto Preferences", key="save_auto_prefs"):
+        merged_settings = load_web_settings()
+        merged_settings["AUTO_SYNC_PROMPT_STATUS"] = "true" if auto_sync_prompt_status else "false"
+        merged_settings["AUTO_QUEUE_ADD"] = "true" if autoqueue_add else "false"
+        merged_settings["AUTO_RUN"] = "true" if autorun else "false"
+        save_web_settings(merged_settings)
+        st.success("Auto preferences saved")
 
     # --- Auto-queue logic ---
     if autoqueue_add:
@@ -1045,10 +1057,12 @@ def _render_queue_status_panel(runner: "PipelineRunner", deployed_mode: bool) ->
 
     # --- Auto-run logic ---
     if autorun:
-        # Find next queued task and run it
-        queued_tasks = [t for t in runner.get_queue(limit=1, status="queued")]
+        # Find the oldest queued task and run it
+        queued_tasks = runner.get_queue(limit=1000, status="queued")
         if queued_tasks:
-            task_id = int(queued_tasks[0]["id"])
+            # Sort by id ascending (oldest first)
+            queued_tasks_sorted = sorted(queued_tasks, key=lambda t: int(t["id"]))
+            task_id = int(queued_tasks_sorted[0]["id"])
             with st.spinner(f"Auto-running task #{task_id}..."):
                 result = runner.process_task(task_id)
             if result.get("status") == "success":
