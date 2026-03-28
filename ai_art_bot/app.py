@@ -1212,7 +1212,12 @@ def _render_queue_status_panel(runner: "PipelineRunner", deployed_mode: bool) ->
         truncated_prompt = (prompt_text[:80] + "...") if len(prompt_text) > 80 else prompt_text
         cols = st.columns([1, 4, 2, 2, 2, 2])
         # Add checkbox for selection
-        checked = cols[0].checkbox("", value=task_id in selected_task_ids, key=f"select_task_{task_id}")
+        checked = cols[0].checkbox(
+            label=f"Select task {task_id}",
+            value=task_id in selected_task_ids,
+            key=f"select_task_{task_id}",
+            label_visibility="collapsed"
+        )
         if checked:
             selected_task_ids.add(task_id)
         else:
