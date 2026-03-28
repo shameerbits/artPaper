@@ -719,9 +719,14 @@ def _render_manual_prompt_panel(
 
     library = _load_prompt_library()
     task_list = runner.get_queue(limit=500)
-    # Only consider tasks with status 'queued' for 'In Queue'
-    queued_prompts = {task.get("prompt", "").strip() for task in task_list if task.get("prompt") and str(task.get("status", "")).strip().lower() == "queued"}
-    # Always compute 'In Queue' status live from DB
+    # Build a mapping from prompt text to latest status (by id)
+    latest_status_for_prompt = {}
+    for t in task_list:
+        prompt_text = str(t.get("prompt", "")).strip()
+        status = str(t.get("status", "")).strip().lower()
+        tid = int(t["id"])
+        if prompt_text not in latest_status_for_prompt or tid > latest_status_for_prompt[prompt_text][1]:
+            latest_status_for_prompt[prompt_text] = (status, tid)
 
     st.subheader("Prompt Management")
     backend = _prompt_library_backend()
@@ -784,15 +789,15 @@ def _render_manual_prompt_panel(
             header_cols = st.columns([1, 2, 1, 8, 2])
             header_cols[0].markdown("**ID**")
             header_cols[1].markdown("**Added**")
-            header_cols[2].markdown("**In Queue**")
+            header_cols[2].markdown("**Latest Status**")
             header_cols[3].markdown("**Prompt**")
             header_cols[4].markdown("**Actions**")
 
             for prompt_id, prompt_data in sorted_prompts:
                 prompt_text = str(prompt_data.get("text", "")).strip()
                 added_at = str(prompt_data.get("added_at", ""))[:10]
-                # Only show 'Yes' if a queued task exists for this prompt
-                in_queue = "Yes" if any(task.get("prompt", "").strip() == prompt_text and str(task.get("status", "")).strip().lower() == "queued" for task in task_list) else "No"
+                # Show latest status for this prompt (if any task exists)
+                latest_status = latest_status_for_prompt.get(prompt_text, ("-", -1))[0]
                 is_selected = st.session_state.get("selected_prompt_id", "") == prompt_id
                 is_editing = st.session_state.get("editing_prompt_id", "") == prompt_id
                 edit_key = f"saved_prompt_edit_{prompt_id}"
@@ -800,7 +805,7 @@ def _render_manual_prompt_panel(
                 row_cols = st.columns([1, 2, 1, 8, 2])
                 row_cols[0].write(prompt_id)
                 row_cols[1].write(added_at or "Unknown")
-                row_cols[2].write(in_queue)
+                row_cols[2].write(latest_status)
 
                 if is_selected and is_editing:
                     if edit_key not in st.session_state:
