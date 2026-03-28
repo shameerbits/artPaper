@@ -713,7 +713,8 @@ def _render_manual_prompt_panel(
 
     library = _load_prompt_library()
     task_list = runner.get_queue(limit=500)
-    queued_prompts = {task.get("prompt", "").strip() for task in task_list if task.get("prompt")}
+    # Only consider tasks with status 'queued' for 'In Queue'
+    queued_prompts = {task.get("prompt", "").strip() for task in task_list if task.get("prompt") and str(task.get("status", "")).strip().lower() == "queued"}
     # Always compute 'In Queue' status live from DB
 
     st.subheader("Prompt Management")
@@ -784,7 +785,8 @@ def _render_manual_prompt_panel(
             for prompt_id, prompt_data in sorted_prompts:
                 prompt_text = str(prompt_data.get("text", "")).strip()
                 added_at = str(prompt_data.get("added_at", ""))[:10]
-                in_queue = "Yes" if prompt_text in queued_prompts else "No"
+                # Only show 'Yes' if a queued task exists for this prompt
+                in_queue = "Yes" if any(task.get("prompt", "").strip() == prompt_text and str(task.get("status", "")).strip().lower() == "queued" for task in task_list) else "No"
                 is_selected = st.session_state.get("selected_prompt_id", "") == prompt_id
                 is_editing = st.session_state.get("editing_prompt_id", "") == prompt_id
                 edit_key = f"saved_prompt_edit_{prompt_id}"
@@ -868,10 +870,14 @@ def _render_manual_prompt_panel(
         manual_prompt = ""
         if prompt_source == "from_library" and library:
             sorted_prompts = sorted(library.items(), key=lambda x: int(x[0]), reverse=True)
-            prompt_options = {f"#{pid}: {data.get('text', '')[:60]}...": data.get('text', '') 
-                            for pid, data in sorted_prompts}
-            selected = st.selectbox("Select a prompt", options=list(prompt_options.keys()))
-            manual_prompt = prompt_options[selected]
+            # Only include prompts that are not 'success' in the dropdown
+            prompt_options = {f"#{pid}: {data.get('text', '')[:60]}...": data.get('text', '')
+                             for pid, data in sorted_prompts if str(data.get('status', '')).strip().lower() != 'success'}
+            if prompt_options:
+                selected = st.selectbox("Select a prompt", options=list(prompt_options.keys()))
+                manual_prompt = prompt_options[selected]
+            else:
+                st.warning("No eligible prompts (non-success) in library. Add or reset prompts first!")
         elif prompt_source == "from_library":
             st.warning("No prompts in library. Add some prompts first!")
         else:
@@ -1120,15 +1126,62 @@ def _render_queue_status_panel(runner: "PipelineRunner", deployed_mode: bool) ->
         cols[2].write(task.get("status", "no_info"))
         cols[3].write(task.get("pipeline_mode", "no_info"))
         cols[4].write(task.get("created_at", "no_info"))
-        if not deployed_mode and task.get("status") == "queued":
-            if cols[5].button(f"Run #{task_id}", key=f"run_task_{task_id}"):
-                with st.spinner(f"Running task #{task_id}..."):
-                    result = runner.process_task(task_id)
-                if result.get("status") == "success":
-                    st.success(f"Task #{task_id} finished")
+
+        # Retry logic for failed tasks
+        retry_section = None
+        if not deployed_mode:
+            if task.get("status") == "queued":
+                if cols[5].button(f"Run #{task_id}", key=f"run_task_{task_id}"):
+                    with st.spinner(f"Running task #{task_id}..."):
+                        result = runner.process_task(task_id)
+                    if result.get("status") == "success":
+                        st.success(f"Task #{task_id} finished")
+                    else:
+                        st.error(f"Task #{task_id} failed: {result.get('error', 'unknown error')}")
+                    st.rerun()
+            elif task.get("status") == "failure":
+                # Determine where it failed and offer retry options
+                pipeline_mode = str(task.get("pipeline_mode", "full")).lower()
+                image_path = task.get("image_path")
+                upscaled_path = task.get("upscaled_path")
+                # If failed in upscale or upload, allow retry from that step
+                if pipeline_mode in {"generate_only", "generate_upscale", "full"} and not image_path:
+                    retry_section = "generate"
+                elif pipeline_mode in {"upscale_only", "generate_upscale", "upscale_upload", "full"} and not upscaled_path:
+                    retry_section = "upscale"
+                elif pipeline_mode in {"upload_only", "upscale_upload", "full"}:
+                    retry_section = "upload"
+                # Show retry buttons
+                if retry_section == "upscale" and image_path:
+                    if cols[5].button(f"Retry Upscale #{task_id}", key=f"retry_upscale_{task_id}"):
+                        # Re-enqueue task starting from upscale
+                        new_task_id = runner.enqueue_manual_task(
+                            prompt=prompt_text,
+                            prompt_mode=task.get("prompt_mode", "as_is"),
+                            pipeline_mode="upscale_only",
+                            settings=task.get("settings_json"),
+                            source_image_path=image_path,
+                            source_upscaled_path=None,
+                        )
+                        st.success(f"Enqueued retry for Upscale as Task #{new_task_id}")
+                        st.rerun()
+                elif retry_section == "upload" and (upscaled_path or image_path):
+                    if cols[5].button(f"Retry Upload #{task_id}", key=f"retry_upload_{task_id}"):
+                        # Re-enqueue task starting from upload
+                        new_task_id = runner.enqueue_manual_task(
+                            prompt=prompt_text,
+                            prompt_mode=task.get("prompt_mode", "as_is"),
+                            pipeline_mode="upload_only",
+                            settings=task.get("settings_json"),
+                            source_image_path=image_path,
+                            source_upscaled_path=upscaled_path,
+                        )
+                        st.success(f"Enqueued retry for Upload as Task #{new_task_id}")
+                        st.rerun()
                 else:
-                    st.error(f"Task #{task_id} failed: {result.get('error', 'unknown error')}")
-                st.rerun()
+                    cols[5].write("-")
+            else:
+                cols[5].write("-")
         else:
             cols[5].write("-")
 
