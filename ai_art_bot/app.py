@@ -977,8 +977,25 @@ def _render_manual_prompt_panel(
 def _render_queue_status_panel(runner: "PipelineRunner", deployed_mode: bool) -> None:
     import streamlit as st
 
+
     st.subheader("Task Queue Status")
     library = _load_prompt_library()
+    # --- Auto-sync prompt status checkbox ---
+    if "queue_panel_auto_sync_prompt_status" not in st.session_state:
+        st.session_state["queue_panel_auto_sync_prompt_status"] = False
+    auto_sync_prompt_status = st.checkbox(
+        "Auto-sync prompt status to gist",
+        key="queue_panel_auto_sync_prompt_status",
+        help="When enabled, the prompt library in gist will be updated with the latest status from the task queue.",
+    )
+    if auto_sync_prompt_status:
+        try:
+            changed = sync_prompt_status_from_tasks()
+            if changed:
+                st.info("Prompt library gist updated with latest statuses.")
+        except Exception as exc:
+            st.warning(f"Prompt status sync failed: {exc}")
+
     if "queue_panel_auto_queue" not in st.session_state:
         st.session_state["queue_panel_auto_queue"] = False
 
@@ -1122,68 +1139,93 @@ def _render_queue_status_panel(runner: "PipelineRunner", deployed_mode: bool) ->
         if controls[1].button("Refresh Queue"):
             st.rerun()
 
+    # --- Task selection state ---
+    if "selected_task_ids" not in st.session_state:
+        st.session_state["selected_task_ids"] = set()
+
+    selected_task_ids = st.session_state["selected_task_ids"]
+    task_id_to_checkbox = {}
+
+    # --- Find latest task id for each prompt ---
+    latest_task_id_for_prompt = {}
+    for t in tasks:
+        prompt_text = str(t.get("prompt", "")).strip()
+        tid = int(t["id"])
+        if prompt_text not in latest_task_id_for_prompt or tid > latest_task_id_for_prompt[prompt_text]:
+            latest_task_id_for_prompt[prompt_text] = tid
+
     for task in tasks:
         task_id = int(task["id"])
         prompt_text = str(task.get("prompt", ""))
         truncated_prompt = (prompt_text[:80] + "...") if len(prompt_text) > 80 else prompt_text
         cols = st.columns([1, 4, 2, 2, 2, 2])
+        # Add checkbox for selection
+        checked = cols[0].checkbox("", value=task_id in selected_task_ids, key=f"select_task_{task_id}")
+        if checked:
+            selected_task_ids.add(task_id)
+        else:
+            selected_task_ids.discard(task_id)
+        task_id_to_checkbox[task_id] = checked
         cols[0].write(task_id)
         cols[1].write(truncated_prompt)
         cols[2].write(task.get("status", "no_info"))
         cols[3].write(task.get("pipeline_mode", "no_info"))
         cols[4].write(task.get("created_at", "no_info"))
 
-        # Retry logic for failed tasks
+        # Only allow rerun/retry for the latest failed task for each prompt
+        is_latest_for_prompt = (task_id == latest_task_id_for_prompt.get(prompt_text, -1))
+
         retry_section = None
         if not deployed_mode:
             if task.get("status") == "queued":
-                if cols[5].button(f"Run #{task_id}", key=f"run_task_{task_id}"):
-                    with st.spinner(f"Running task #{task_id}..."):
-                        result = runner.process_task(task_id)
-                    if result.get("status") == "success":
-                        st.success(f"Task #{task_id} finished")
-                    else:
-                        st.error(f"Task #{task_id} failed: {result.get('error', 'unknown error')}")
-                    st.rerun()
+                if is_latest_for_prompt:
+                    if cols[5].button(f"Run #{task_id}", key=f"run_task_{task_id}"):
+                        with st.spinner(f"Running task #{task_id}..."):
+                            result = runner.process_task(task_id)
+                        if result.get("status") == "success":
+                            st.success(f"Task #{task_id} finished")
+                        else:
+                            st.error(f"Task #{task_id} failed: {result.get('error', 'unknown error')}")
+                        st.rerun()
+                else:
+                    cols[5].write("-")
             elif task.get("status") == "failure":
-                # Determine where it failed and offer retry options
-                pipeline_mode = str(task.get("pipeline_mode", "full")).lower()
-                image_path = task.get("image_path")
-                upscaled_path = task.get("upscaled_path")
-                # If failed in upscale or upload, allow retry from that step
-                if pipeline_mode in {"generate_only", "generate_upscale", "full"} and not image_path:
-                    retry_section = "generate"
-                elif pipeline_mode in {"upscale_only", "generate_upscale", "upscale_upload", "full"} and not upscaled_path:
-                    retry_section = "upscale"
-                elif pipeline_mode in {"upload_only", "upscale_upload", "full"}:
-                    retry_section = "upload"
-                # Show retry buttons
-                if retry_section == "upscale" and image_path:
-                    if cols[5].button(f"Retry Upscale #{task_id}", key=f"retry_upscale_{task_id}"):
-                        # Re-enqueue task starting from upscale
-                        new_task_id = runner.enqueue_manual_task(
-                            prompt=prompt_text,
-                            prompt_mode=task.get("prompt_mode", "as_is"),
-                            pipeline_mode="upscale_only",
-                            settings=task.get("settings_json"),
-                            source_image_path=image_path,
-                            source_upscaled_path=None,
-                        )
-                        st.success(f"Enqueued retry for Upscale as Task #{new_task_id}")
-                        st.rerun()
-                elif retry_section == "upload" and (upscaled_path or image_path):
-                    if cols[5].button(f"Retry Upload #{task_id}", key=f"retry_upload_{task_id}"):
-                        # Re-enqueue task starting from upload
-                        new_task_id = runner.enqueue_manual_task(
-                            prompt=prompt_text,
-                            prompt_mode=task.get("prompt_mode", "as_is"),
-                            pipeline_mode="upload_only",
-                            settings=task.get("settings_json"),
-                            source_image_path=image_path,
-                            source_upscaled_path=upscaled_path,
-                        )
-                        st.success(f"Enqueued retry for Upload as Task #{new_task_id}")
-                        st.rerun()
+                if is_latest_for_prompt:
+                    pipeline_mode = str(task.get("pipeline_mode", "full")).lower()
+                    image_path = task.get("image_path")
+                    upscaled_path = task.get("upscaled_path")
+                    if pipeline_mode in {"generate_only", "generate_upscale", "full"} and not image_path:
+                        retry_section = "generate"
+                    elif pipeline_mode in {"upscale_only", "generate_upscale", "upscale_upload", "full"} and not upscaled_path:
+                        retry_section = "upscale"
+                    elif pipeline_mode in {"upload_only", "upscale_upload", "full"}:
+                        retry_section = "upload"
+                    if retry_section == "upscale" and image_path:
+                        if cols[5].button(f"Retry Upscale #{task_id}", key=f"retry_upscale_{task_id}"):
+                            new_task_id = runner.enqueue_manual_task(
+                                prompt=prompt_text,
+                                prompt_mode=task.get("prompt_mode", "as_is"),
+                                pipeline_mode="upscale_only",
+                                settings=task.get("settings_json"),
+                                source_image_path=image_path,
+                                source_upscaled_path=None,
+                            )
+                            st.success(f"Enqueued retry for Upscale as Task #{new_task_id}")
+                            st.rerun()
+                    elif retry_section == "upload" and (upscaled_path or image_path):
+                        if cols[5].button(f"Retry Upload #{task_id}", key=f"retry_upload_{task_id}"):
+                            new_task_id = runner.enqueue_manual_task(
+                                prompt=prompt_text,
+                                prompt_mode=task.get("prompt_mode", "as_is"),
+                                pipeline_mode="upload_only",
+                                settings=task.get("settings_json"),
+                                source_image_path=image_path,
+                                source_upscaled_path=upscaled_path,
+                            )
+                            st.success(f"Enqueued retry for Upload as Task #{new_task_id}")
+                            st.rerun()
+                    else:
+                        cols[5].write("-")
                 else:
                     cols[5].write("-")
             else:
@@ -1193,6 +1235,21 @@ def _render_queue_status_panel(runner: "PipelineRunner", deployed_mode: bool) ->
 
         if task.get("status") == "failure" and task.get("error_message"):
             st.caption(f"Task #{task_id} error: {task['error_message']}")
+
+    # Delete selected tasks button
+    if not deployed_mode and selected_task_ids:
+        if st.button("Delete Selected Tasks", type="primary", use_container_width=True, key="delete_selected_tasks"):
+            from database.db import delete_task
+            deleted = 0
+            for tid in list(selected_task_ids):
+                try:
+                    delete_task(tid)
+                    selected_task_ids.discard(tid)
+                    deleted += 1
+                except Exception as exc:
+                    st.error(f"Failed to delete task {tid}: {exc}")
+            st.success(f"Deleted {deleted} task(s) from queue.")
+            st.rerun()
 
 
 def _render_deployed_prompt_library_settings(saved_settings: dict[str, str]) -> dict[str, str]:
@@ -1243,6 +1300,34 @@ def _render_deployed_prompt_library_settings(saved_settings: dict[str, str]) -> 
         st.rerun()
 
     return prompt_settings
+
+
+def sync_prompt_status_from_tasks():
+    from database.db import list_tasks
+    library = _load_prompt_library()
+    # Build a mapping from prompt text to (latest status, latest updated_at)
+    prompt_status_map = {}
+    for task in list_tasks(limit=10000):
+        prompt_text = str(task.get("prompt", "")).strip()
+        status = str(task.get("status", "")).strip().lower()
+        updated_at = str(task.get("updated_at", ""))
+        if not prompt_text:
+            continue
+        # Only keep the most recent status for each prompt
+        if prompt_text not in prompt_status_map or updated_at > prompt_status_map[prompt_text][1]:
+            prompt_status_map[prompt_text] = (status, updated_at)
+    # Update the prompt library status using prompt_id
+    changed = False
+    for prompt_id, prompt_data in library.items():
+        prompt_text = str(prompt_data.get("text", "")).strip()
+        if prompt_text in prompt_status_map:
+            new_status = prompt_status_map[prompt_text][0]
+            if prompt_data.get("status", "") != new_status:
+                library[prompt_id]["status"] = new_status
+                changed = True
+    if changed:
+        _save_prompt_library(library)
+    return changed
 
 
 def run_streamlit_app() -> None:

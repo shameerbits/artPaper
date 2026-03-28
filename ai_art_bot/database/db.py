@@ -232,3 +232,13 @@ def task_settings(task: dict) -> dict[str, Any]:
     except Exception:
         return {}
     return payload if isinstance(payload, dict) else {}
+
+
+def delete_task(task_id: int) -> None:
+    with _connect() as connection:
+        connection.execute(
+            """
+            DELETE FROM tasks WHERE id = ?
+            """,
+            (task_id,),
+        )
