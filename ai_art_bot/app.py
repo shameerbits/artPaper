@@ -644,8 +644,14 @@ def _save_prompt_library(library: dict[str, Any]) -> None:
     from pathlib import Path
 
     backend = _prompt_library_backend()
-    if backend == "github_gist":
+    # Always update gist if Gist config is present, regardless of backend
+    try:
         _save_prompt_library_to_gist(library)
+    except Exception as exc:
+        # Log but do not block local save if gist update fails
+        logger.warning(f"Failed to update prompt library gist: {exc}")
+
+    if backend == "github_gist":
         return
 
     path = _get_prompt_library_path()
