@@ -1001,14 +1001,61 @@ def _render_queue_status_panel(runner: "PipelineRunner", deployed_mode: bool) ->
         except Exception as exc:
             st.warning(f"Prompt status sync failed: {exc}")
 
-    if "queue_panel_auto_queue" not in st.session_state:
-        st.session_state["queue_panel_auto_queue"] = False
-
-    auto_queue_mode = st.checkbox(
-        "Auto-queue next eligible prompt after completion",
-        key="queue_panel_auto_queue",
-        help="When enabled, each successful/failed run auto-enqueues the next prompt-library item that is not queued/running.",
+    # --- Auto-queue and Auto-run checkboxes ---
+    if "queue_panel_autoqueue_add" not in st.session_state:
+        st.session_state["queue_panel_autoqueue_add"] = False
+    if "queue_panel_autorun" not in st.session_state:
+        st.session_state["queue_panel_autorun"] = False
+    autoqueue_add = st.checkbox(
+        "Auto-queue eligible prompts (add to queue)",
+        key="queue_panel_autoqueue_add",
+        help="When enabled, eligible prompts from the library will be automatically added to the queue.",
     )
+    autorun = st.checkbox(
+        "Auto-run queued tasks (local worker)",
+        key="queue_panel_autorun",
+        help="When enabled, this instance will automatically process queued tasks as a worker.",
+    )
+
+    # --- Auto-queue logic ---
+    if autoqueue_add:
+        # Find next eligible prompt and add to queue if not already queued/running/success
+        from time import sleep
+        library = _load_prompt_library()
+        task_list = runner.get_queue(limit=1000)
+        queued_or_running = {t.get("prompt", "").strip() for t in task_list if str(t.get("status", "")).strip().lower() in {"queued", "running", "success"}}
+        for prompt_id, prompt_data in library.items():
+            prompt_text = str(prompt_data.get("text", "")).strip()
+            if not prompt_text or prompt_text in queued_or_running:
+                continue
+            # Add to queue
+            try:
+                runner.enqueue_manual_task(
+                    prompt=prompt_text,
+                    prompt_mode=prompt_data.get("prompt_mode", "as_is"),
+                    pipeline_mode=prompt_data.get("pipeline_mode", "full"),
+                    settings=None,
+                    source_image_path=None,
+                    source_upscaled_path=None,
+                )
+                st.info(f"Auto-queued prompt: {prompt_text[:60]}...")
+                sleep(0.5)  # avoid flooding
+            except Exception as exc:
+                st.warning(f"Failed to auto-queue prompt: {prompt_text[:60]}... ({exc})")
+
+    # --- Auto-run logic ---
+    if autorun:
+        # Find next queued task and run it
+        queued_tasks = [t for t in runner.get_queue(limit=1, status="queued")]
+        if queued_tasks:
+            task_id = int(queued_tasks[0]["id"])
+            with st.spinner(f"Auto-running task #{task_id}..."):
+                result = runner.process_task(task_id)
+            if result.get("status") == "success":
+                st.success(f"Auto-run: Task #{task_id} finished")
+            else:
+                st.error(f"Auto-run: Task #{task_id} failed: {result.get('error', 'unknown error')}")
+            st.rerun()
 
     # Save Auto Queue Preference button (moved here)
     if st.button("Save Auto Queue Preference", key="save_auto_queue_preference_queue_panel"):
