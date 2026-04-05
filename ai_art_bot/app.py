@@ -765,7 +765,7 @@ def _render_manual_prompt_panel(
                     prompt_provider = importlib.import_module("scraper.prompt_provider")
                     civitai_prompt = prompt_provider.get_random_prompt()
                     st.session_state["civitai_autofill_prompt"] = civitai_prompt
-                    st.experimental_rerun()
+                    st.rerun()
                 except Exception as exc:
                     st.error(f"Failed to fetch prompt from CivitAI: {exc}")
             st.markdown("")
