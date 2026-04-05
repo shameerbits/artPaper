@@ -745,29 +745,26 @@ def _render_manual_prompt_panel(
 
 
         import importlib
-        from streamlit import session_state
         col1, col2 = st.columns([3, 1])
+        # Always use session_state for autofill value
+        if "civitai_autofill_prompt" not in st.session_state:
+            st.session_state["civitai_autofill_prompt"] = ""
         with col1:
-            # If session_state has a civitai prompt, use it as default
-            default_prompt = session_state.get("civitai_autofill_prompt", "")
             new_prompt = st.text_area(
                 "Add new prompt",
                 height=100,
                 placeholder="Describe your image...",
                 key="new_prompt_input",
-                value=default_prompt,
+                value=st.session_state["civitai_autofill_prompt"],
             )
         with col2:
             st.markdown("")
             # Button to auto-generate from CivitAI
             if st.button("Auto-generate from CivitAI", key="civitai_autogen_btn", use_container_width=True):
                 try:
-                    # Lazy import to avoid circular import
                     prompt_provider = importlib.import_module("scraper.prompt_provider")
                     civitai_prompt = prompt_provider.get_random_prompt()
-                    session_state["civitai_autofill_prompt"] = civitai_prompt
-                    st.session_state["new_prompt_input"] = civitai_prompt
-                    st.success("Prompt fetched from CivitAI. You can edit and add to library.")
+                    st.session_state["civitai_autofill_prompt"] = civitai_prompt
                     st.experimental_rerun()
                 except Exception as exc:
                     st.error(f"Failed to fetch prompt from CivitAI: {exc}")
@@ -781,7 +778,7 @@ def _render_manual_prompt_panel(
                     }
                     _save_prompt_library(library)
                     # Clear autofill after adding
-                    session_state["civitai_autofill_prompt"] = ""
+                    st.session_state["civitai_autofill_prompt"] = ""
                     st.success(f"Prompt added to library")
                     st.rerun()
                 else:
