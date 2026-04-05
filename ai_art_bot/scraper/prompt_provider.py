@@ -307,7 +307,9 @@ def _prompts_from_civitai() -> list[str]:
         f"rejected_missing_prompt={rejected_missing_prompt}, "
         f"final_unique={len(prompts)}"
     )
-    return sorted(prompts)
+    prompts_list = sorted(prompts)
+    random.shuffle(prompts_list)
+    return prompts_list
 
 
 def _enhance_prompt(prompt: str) -> str:
