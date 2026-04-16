@@ -312,14 +312,49 @@ def _prompts_from_civitai() -> list[str]:
     return prompts_list
 
 
+
+# --- New: GPT-Image-1 strict enhancer ---
+def gpt_image1_enhance_prompt(prompt: str) -> str:
+    """
+    Enhance a prompt for gpt-image-1 API using strict, production-ready rules.
+    """
+    if OPENAI_CLIENT is None:
+        logger.warning("OPENAI_API_KEY not set; skipping gpt-image-1 prompt enhancement")
+        return prompt
+    try:
+        system_message = (
+            "You are an expert in generating production-ready prompts for OpenAI gpt-image-1 API.\n"
+            "Convert the user's idea into a clean, precise, and controllable image generation prompt optimized for API usage.\n"
+            "STRICT RULES: Avoid overloaded/conflicting styles (max 2–3 style effects), enforce composition (centered, framing, alignment if needed), clearly define lighting direction (position of sun, shadows, glow), use realistic photographic language (lens, lighting, environment), avoid vague words like 'beautiful', 'stunning', keep prompt concise but descriptive, prioritize subject clarity over artistic effects, ensure consistent cinematic color grading (if needed), do NOT include sections like Subject:, Details:, etc., output a single clean paragraph prompt only. Optionally, slightly enhance the idea for better realism and composition."
+        )
+        user_message = f"[ORIGINAL PROMPT]\n{prompt}"
+        response = OPENAI_CLIENT.chat.completions.create(
+            model="gpt-4-turbo",
+            messages=[
+                {"role": "system", "content": system_message},
+                {"role": "user", "content": user_message},
+            ],
+            max_tokens=180,
+            temperature=0.7,
+        )
+        enhanced = response.choices[0].message.content.strip()
+        if _is_valid_prompt(enhanced):
+            logger.info("Prompt enhanced for gpt-image-1 API")
+            logger.info(f"Enhanced prompt preview: {_preview(enhanced)}")
+            return enhanced
+        logger.warning("gpt-image-1 enhanced prompt was invalid; using original prompt")
+        return prompt
+    except Exception as exc:
+        logger.warning(f"gpt-image-1 prompt enhancement failed: {exc}")
+        return prompt
+
+# Backward-compatible: keep _enhance_prompt for other uses
 def _enhance_prompt(prompt: str) -> str:
     if not ENABLE_PROMPT_ENHANCER:
         return prompt
-
     if OPENAI_CLIENT is None:
         logger.warning("OPENAI_API_KEY not set; skipping GPT prompt enhancement")
         return prompt
-
     try:
         response = OPENAI_CLIENT.responses.create(
             model=PROMPT_ENHANCER_MODEL,
@@ -419,6 +454,8 @@ def _dedupe(prompts: list[str]) -> list[str]:
     return deduped
 
 
+
+# --- Main entry: always enhance for gpt-image-1 before returning ---
 def get_random_prompt() -> str:
     civitai_prompts = _prompts_from_civitai()
     generated_prompts = _generate_prompts(count=40)
@@ -432,7 +469,8 @@ def get_random_prompt() -> str:
             source = "civitai"
             logger.info(f"Selected prompt source: {source}")
             logger.info(f"Selected base prompt preview: {_preview(selected)}")
-            final_prompt = _enhance_prompt(selected)
+            # Always enhance for gpt-image-1
+            final_prompt = gpt_image1_enhance_prompt(selected)
             logger.info(f"Final selected prompt: {_preview(final_prompt)}")
             return final_prompt
 
@@ -444,7 +482,7 @@ def get_random_prompt() -> str:
             source = "local_generator"
             logger.info(f"Selected prompt source: {source}")
             logger.info(f"Selected base prompt preview: {_preview(selected)}")
-            final_prompt = _enhance_prompt(selected)
+            final_prompt = gpt_image1_enhance_prompt(selected)
             logger.info(f"Final selected prompt: {_preview(final_prompt)}")
             return final_prompt
 
@@ -458,7 +496,7 @@ def get_random_prompt() -> str:
             source = "prompts_txt"
             logger.info(f"Selected prompt source: {source}")
             logger.info(f"Selected base prompt preview: {_preview(selected)}")
-            final_prompt = _enhance_prompt(selected)
+            final_prompt = gpt_image1_enhance_prompt(selected)
             logger.info(f"Final selected prompt: {_preview(final_prompt)}")
             return final_prompt
 
